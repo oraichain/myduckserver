@@ -236,7 +236,7 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 
 	// Save the table DDL to the DuckDB database
 	if table != nil {
-		err = b.SaveTableDDL(ctx, n, conn)
+		err = b.SaveTableDDL(ctx, table, conn)
 		if err != nil {
 			return nil, err
 		}
