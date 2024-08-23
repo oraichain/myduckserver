@@ -18,12 +18,11 @@ import (
 	"context"
 	"fmt"
 
-	stdsql "database/sql"
-
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/sirupsen/logrus"
 
 	_ "github.com/marcboeker/go-duckdb"
 )
@@ -52,13 +51,17 @@ func checkDependencies() {
 func main() {
 	checkDependencies()
 
-	pro := memory.NewDBProvider()
-	engine := sqle.NewDefault(pro)
+	provider := memory.NewDBProvider()
+	engine := sqle.NewDefault(provider)
 
-	builder := &DuckBuilder{provider: pro, base: engine.Analyzer.ExecBuilder, conns: make(map[uint32]*stdsql.DB)}
+	if err := Load(provider, engine); err != nil {
+		logrus.Fatalln("Failed to load the database:", err)
+	}
+
+	builder := &DuckBuilder{provider: provider, base: engine.Analyzer.ExecBuilder}
 	engine.Analyzer.ExecBuilder = builder
 
-	session := memory.NewSession(sql.NewBaseSession(), pro)
+	session := memory.NewSession(sql.NewBaseSession(), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
 	ctx.SetCurrentDatabase("mysql")
 
@@ -75,7 +78,7 @@ func main() {
 		Protocol: "tcp",
 		Address:  fmt.Sprintf("%s:%d", address, port),
 	}
-	s, err := server.NewServerWithHandler(config, engine, memory.NewSessionBuilder(pro), nil, wrapHandler(builder))
+	s, err := server.NewServerWithHandler(config, engine, memory.NewSessionBuilder(provider), nil, wrapHandler(builder))
 	if err != nil {
 		panic(err)
 	}

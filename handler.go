@@ -15,6 +15,7 @@
 package main
 
 import (
+	stdsql "database/sql"
 	"fmt"
 
 	"github.com/dolthub/go-mysql-server/server"
@@ -28,23 +29,29 @@ type MyHandler struct {
 }
 
 func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
-	conn, ok := h.builder.conns[c.ConnectionID]
+	entry, ok := h.builder.conns.Load(c.ConnectionID)
 	if ok {
+		conn := entry.(*stdsql.DB)
 		if err := conn.Close(); err != nil {
 			logrus.Warn("Failed to close connection:", err)
 		}
-		delete(h.builder.conns, c.ConnectionID)
+		h.builder.conns.Delete(c.ConnectionID)
 	}
 	h.Handler.ConnectionClosed(c)
 }
 
 func (h *MyHandler) ComInitDB(c *mysql.Conn, schemaName string) error {
-	conn, ok := h.builder.conns[c.ConnectionID]
-	if ok {
+	conn, err := h.builder.GetConn(c.ConnectionID)
+	if err != nil {
+		return err
+	}
+
+	if schemaName != "" {
 		if _, err := conn.Exec("USE " + dbName + "." + schemaName); err != nil {
-			logrus.Warn("Failed to use "+schemaName+":", err)
+			logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
 		}
 	}
+
 	return h.Handler.ComInitDB(c, schemaName)
 }
 
