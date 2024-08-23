@@ -77,6 +77,8 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	}
 
 	switch node := n.(type) {
+	case *plan.ShowCreateTable:
+		return b.base.Build(ctx, n, r)
 	case *plan.ResolvedTable:
 		return b.executeQuery(ctx, node, conn)
 	case sql.Expressioner:
