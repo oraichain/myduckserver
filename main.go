@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Dolthub, Inc.
+// Copyright 2024-2025 ApeCloud, Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -94,7 +94,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 	switch node := n.(type) {
 	case *plan.ResolvedTable:
-		return b.executeQuery(ctx, node, conn)
+		return b.executeQuery(ctx, node, conn, true)
 	case sql.Expressioner:
 		return b.executeExpressioner(ctx, node, conn)
 	case *plan.CreateDB:
@@ -107,7 +107,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 			"create schema",
 			1,
 		))
-		return b.executeDDL(ctx, node, conn)
+		return b.executeDDL(ctx, node, conn, false)
 	case *plan.DropDB:
 		if err := b.executeBase(ctx, node, r); err != nil {
 			return nil, err
@@ -118,11 +118,11 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 			"drop schema",
 			1,
 		))
-		return b.executeDDL(ctx, node, conn)
+		return b.executeDDL(ctx, node, conn, false)
 	case *plan.DropTable:
-		return b.executeDDL(ctx, node, conn)
+		return b.executeDDL(ctx, node, conn, true)
 	case *plan.RenameTable:
-		return b.executeDDL(ctx, node, conn)
+		return b.executeDDL(ctx, node, conn, true)
 	case *plan.DeleteFrom:
 		return b.executeDML(ctx, n, conn)
 	default:
@@ -146,32 +146,37 @@ func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, 
 		if err := b.executeBase(ctx, node, nil); err != nil {
 			return nil, err
 		}
-		return b.executeDDL(ctx, n, conn)
+		return b.executeDDL(ctx, n, conn, true)
 	case *plan.AddColumn:
-		return b.executeDDL(ctx, n, conn)
+		return b.executeDDL(ctx, n, conn, true)
 	case *plan.RenameColumn:
-		return b.executeDDL(ctx, n, conn)
+		return b.executeDDL(ctx, n, conn, true)
 	case *plan.DropColumn:
-		return b.executeDDL(ctx, n, conn)
+		return b.executeDDL(ctx, n, conn, true)
 	case *plan.ModifyColumn:
-		return b.executeDDL(ctx, n, conn)
+		return b.executeDDL(ctx, n, conn, true)
 	case *plan.InsertInto:
 		return b.executeDML(ctx, n, conn)
 	case *plan.Update:
 		return b.executeDML(ctx, n, conn)
+	case *plan.ShowTables:
+		return b.executeQuery(ctx, node, conn, false)
 	default:
-		return b.executeQuery(ctx, node, conn)
+		return b.executeQuery(ctx, node, conn, true)
 	}
 }
 
-func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
+func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.DB, needTranslate bool) (sql.RowIter, error) {
 	fmt.Println("Executing Query...")
-	// Translate the MySQL query to a DuckDB query
-	duckSQL, err := translate(ctx.Query())
-	if err != nil {
-		return nil, err
+	duckSQL := ctx.Query()
+	var err error
+	if needTranslate {
+		// Translate the MySQL query to a DuckDB query
+		duckSQL, err = translate(ctx.Query())
+		if err != nil {
+			return nil, err
+		}
 	}
-
 	// Execute the DuckDB query
 	rows, err := conn.QueryContext(ctx.Context, duckSQL)
 	if err != nil {
@@ -214,12 +219,16 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.DB) 
 	})), nil
 }
 
-func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
+func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, conn *stdsql.DB, needTranslate bool) (sql.RowIter, error) {
 	fmt.Println("Executing DDL...")
-	// Translate the MySQL query to a DuckDB query
-	duckSQL, err := translate(ctx.Query())
-	if err != nil {
-		return nil, err
+	duckSQL := ctx.Query()
+	var err error
+	if needTranslate {
+		// Translate the MySQL query to a DuckDB query
+		duckSQL, err = translate(ctx.Query())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Execute the DuckDB query
@@ -231,6 +240,23 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, conn *stdsql.DB) 
 	return sql.RowsToRowIter(sql.NewRow(types.OkResult{})), nil
 }
 
+func getPythonPath() (string, error) {
+	// Try to find python3 in the system PATH
+	pythonPath, err := exec.LookPath("python3")
+	if err == nil {
+		return pythonPath, nil
+	}
+
+	// If python3 is not found, try to find python
+	pythonPath, err = exec.LookPath("python")
+	if err == nil {
+		return pythonPath, nil
+	}
+
+	// If neither python3 nor python is found, return an error
+	return "", fmt.Errorf("neither python3 nor python was found in PATH")
+}
+
 // translate converts a MySQL query to a DuckDB query using SQLGlot.
 // For simplicity, we assume that Python and SQLGlot are installed on the system.
 // Then we can call the following shell command to convert the query.
@@ -239,8 +265,14 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, conn *stdsql.DB) 
 //
 // In the future, we can deploy a SQLGlot server and use the API to convert the query.
 func translate(mysqlQuery string) (string, error) {
+	pythonPath, err := getPythonPath()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return "", err
+	}
+
 	// Prepare the command to be executed
-	cmd := exec.Command("python", "-c", `import sys; import sqlglot; sql = sys.stdin.read(); print(sqlglot.transpile(sql, read="mysql", write="duckdb")[0])`)
+	cmd := exec.Command(pythonPath, "-c", `import sys; import sqlglot; sql = sys.stdin.read(); print(sqlglot.transpile(sql, read="mysql", write="duckdb")[0])`)
 
 	// Set the input for the command
 	cmd.Stdin = bytes.NewBufferString(mysqlQuery)
@@ -251,6 +283,7 @@ func translate(mysqlQuery string) (string, error) {
 
 	// Execute the command
 	if err := cmd.Run(); err != nil {
+		fmt.Println("cmd Run error", err)
 		return "", err
 	}
 
