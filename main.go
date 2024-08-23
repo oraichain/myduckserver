@@ -279,11 +279,14 @@ func translate(mysqlQuery string) (string, error) {
 
 	// Capture the output of the command
 	var out bytes.Buffer
+	var outErr bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &outErr
 
 	// Execute the command
 	if err := cmd.Run(); err != nil {
-		fmt.Println("cmd Run error", err)
+		err = fmt.Errorf("failed to execute command(%s): %v\n%s", pythonPath, err, outErr.String())
+		fmt.Println(err)
 		return "", err
 	}
 
@@ -340,7 +343,16 @@ func (iter *SQLRowIter) Close(ctx *sql.Context) error {
 	return iter.rows.Close()
 }
 
+func checkDependencies() {
+	_, err := translate("SELECT 1")
+	if err != nil {
+		panic("Python and SQLGlot are required to run the server. Please install them and try again.")
+	}
+}
+
 func main() {
+	checkDependencies()
+
 	pro := memory.NewDBProvider()
 	engine := sqle.NewDefault(pro)
 
