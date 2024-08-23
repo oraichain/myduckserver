@@ -17,6 +17,7 @@ import (
 	stdsql "database/sql"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -252,7 +253,7 @@ func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsq
 		ddl = ctx.Query()
 	default:
 		showCtx := ctx.WithQuery("SHOW CREATE TABLE " + table.(sql.Nameable).Name())
-		showNode := plan.NewShowCreateTable(table, false)
+		showNode, _ := plan.NewShowCreateTable(table, false).WithTargetSchema(table.Schema())
 		iter, err := b.base.Build(showCtx, showNode, nil)
 		if err != nil {
 			return err
@@ -264,7 +265,12 @@ func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsq
 		if len(rows) == 0 {
 			return fmt.Errorf("no rows returned from SHOW CREATE TABLE")
 		}
-		ddl = rows[0][1].(string)
+
+		var lines []string
+		for _, row := range rows {
+			lines = append(lines, row[1].(string))
+		}
+		ddl = strings.Join(lines, "\n")
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte(ddl))
