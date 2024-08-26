@@ -197,11 +197,6 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.DB) 
 func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
 	logrus.Infoln("Executing DDL...")
 
-	// Execute the DDL in the memory engine first
-	if err := b.executeBase(ctx, n, nil); err != nil {
-		return nil, err
-	}
-
 	var (
 		duckSQL string
 		err     error
@@ -232,6 +227,12 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 	// Execute the DuckDB query
 	_, err = conn.ExecContext(ctx.Context, duckSQL)
 	if err != nil {
+		logrus.Info("SQL to be executed in DuckDB: ", duckSQL)
+		return nil, err
+	}
+
+	// Execute the DDL in the memory engine as well
+	if err := b.executeBase(ctx, n, nil); err != nil {
 		return nil, err
 	}
 
