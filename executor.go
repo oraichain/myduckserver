@@ -213,14 +213,14 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 		if n.IfNotExists {
 			ifNotExists = "IF NOT EXISTS"
 		}
-		duckSQL = fmt.Sprintf("CREATE SCHEMA %s %s", ifNotExists, n.DbName)
+		duckSQL = fmt.Sprintf(`CREATE SCHEMA %s "%s"`, ifNotExists, n.DbName)
 	case *plan.DropDB:
 		// Drop a schema in DuckDB
 		ifExists := ""
 		if n.IfExists {
 			ifExists = "IF EXISTS"
 		}
-		duckSQL = fmt.Sprintf("DROP SCHEMA %s %s", ifExists, n.DbName)
+		duckSQL = fmt.Sprintf(`DROP SCHEMA %s "%s" CASCADE`, ifExists, n.DbName)
 	default:
 		// Translate the MySQL query to a DuckDB query
 		duckSQL, err = translate(ctx.Query())

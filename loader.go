@@ -19,7 +19,6 @@ import (
 	stdsql "database/sql"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"os"
 
 	sqle "github.com/dolthub/go-mysql-server"
@@ -55,7 +54,7 @@ func Load(provider *memory.DbProvider, engine *sqle.Engine) error {
 func loadSchemas(ctx *sql.Context, conn *stdsql.DB, engine *sqle.Engine) error {
 	logrus.Infoln("Loading schemas...")
 
-	rows, err := conn.Query(fmt.Sprintf("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = '%s'", dbName))
+	rows, err := conn.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", dbName)
 	if err != nil {
 		return err
 	}
