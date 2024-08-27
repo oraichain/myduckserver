@@ -390,7 +390,7 @@ func TestDuckBuilder_CreateDatabase(t *testing.T) {
 		sql.WithQuery("CREATE DATABASE test_db"))
 
 	// translate DATABASE to SCHEMA in duckdb
-	mock.ExpectExec("CREATE SCHEMA (.*) test_db").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`CREATE SCHEMA (.*) "test_db"`).WillReturnResult(sqlmock.NewResult(0, 0))
 
 	// Create a CreateDatabase node
 	node := plan.NewCreateDatabase("test_db", true, sql.Collation_Default)
@@ -435,7 +435,7 @@ func TestDuckBuilder_DropDatabase(t *testing.T) {
 		sql.WithQuery("DROP DATABASE test_db"))
 
 	// Mock the result of DROP DATABASE
-	mock.ExpectExec("DROP SCHEMA (.*) test_db").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`DROP SCHEMA (.*) "test_db"`).WillReturnResult(sqlmock.NewResult(0, 0))
 
 	// Create a DropDatabase node
 	node := plan.NewDropDatabase("test_db", true)
