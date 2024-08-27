@@ -29,12 +29,12 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/mysql_db"
 )
 
-var DoltBinlogReplicaController = newDoltBinlogReplicaController()
+var MyBinlogReplicaController = newMyBinlogReplicaController()
 
 // binlogApplierUser is the locked, super user account that is used to execute replicated SQL statements.
 // We cannot always assume the root account will exist, so we automatically create this account that is
 // specific to binlog replication and lock it so that it cannot be used to login.
-const binlogApplierUser = "dolt-binlog-applier"
+const binlogApplierUser = "my-binlog-applier"
 
 // ErrServerNotConfiguredAsReplica is returned when replication is started without enough configuration provided.
 var ErrServerNotConfiguredAsReplica = fmt.Errorf(
@@ -51,12 +51,12 @@ var ErrEmptyUsername = fmt.Errorf("fatal error: Invalid (empty) username when at
 // ErrReplicationStopped is an internal error that is not returned to users, and signals that STOP REPLICA was called.
 var ErrReplicationStopped = fmt.Errorf("replication stop requested")
 
-// doltBinlogReplicaController implements the BinlogReplicaController interface for a Dolt database in order to
+// myBinlogReplicaController implements the BinlogReplicaController interface for a database in order to
 // provide support for a Dolt server to be a replica of a MySQL primary.
 //
 // This type is used concurrently – multiple sessions on the DB can call this interface concurrently,
 // so all state that the controller tracks MUST be protected with a mutex.
-type doltBinlogReplicaController struct {
+type myBinlogReplicaController struct {
 	status  binlogreplication.ReplicaStatus
 	filters *filterConfiguration
 	applier *binlogReplicaApplier
@@ -70,11 +70,11 @@ type doltBinlogReplicaController struct {
 	engine         *sqle.Engine
 }
 
-var _ binlogreplication.BinlogReplicaController = (*doltBinlogReplicaController)(nil)
+var _ binlogreplication.BinlogReplicaController = (*myBinlogReplicaController)(nil)
 
-// newDoltBinlogReplicaController creates a new doltBinlogReplicaController instance.
-func newDoltBinlogReplicaController() *doltBinlogReplicaController {
-	controller := doltBinlogReplicaController{
+// newMyBinlogReplicaController creates a new myBinlogReplicaController instance.
+func newMyBinlogReplicaController() *myBinlogReplicaController {
+	controller := myBinlogReplicaController{
 		filters:        newFilterConfiguration(),
 		statusMutex:    &sync.Mutex{},
 		operationMutex: &sync.Mutex{},
@@ -89,7 +89,7 @@ func newDoltBinlogReplicaController() *doltBinlogReplicaController {
 }
 
 // StartReplica implements the BinlogReplicaController interface.
-func (d *doltBinlogReplicaController) StartReplica(ctx *sql.Context) error {
+func (d *myBinlogReplicaController) StartReplica(ctx *sql.Context) error {
 	d.operationMutex.Lock()
 	defer d.operationMutex.Unlock()
 
@@ -122,10 +122,10 @@ func (d *doltBinlogReplicaController) StartReplica(ctx *sql.Context) error {
 	} else if configuration == nil {
 		return ErrServerNotConfiguredAsReplica
 	} else if configuration.Host == "" {
-		DoltBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyHostname.Error())
+		MyBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyHostname.Error())
 		return ErrEmptyHostname
 	} else if configuration.User == "" {
-		DoltBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyUsername.Error())
+		MyBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyUsername.Error())
 		return ErrEmptyUsername
 	}
 
@@ -160,7 +160,7 @@ func (d *doltBinlogReplicaController) StartReplica(ctx *sql.Context) error {
 // changes and execute DDL statements on the running server. If the account doesn't exist, it will be
 // created and locked to disable log ins, and if it does exist, but is missing super privs or is not
 // locked, it will be given super user privs and locked.
-func (d *doltBinlogReplicaController) configureReplicationUser(ctx *sql.Context) error {
+func (d *myBinlogReplicaController) configureReplicationUser(ctx *sql.Context) error {
 	mySQLDb := d.engine.Analyzer.Catalog.MySQLDb
 	ed := mySQLDb.Editor()
 	defer ed.Close()
@@ -189,19 +189,25 @@ func (d *doltBinlogReplicaController) configureReplicationUser(ctx *sql.Context)
 // SetExecutionContext sets the unique |ctx| for the replica's applier to use when applying changes from binlog events
 // to a database. The applier cannot reuse any existing context, because it executes in a separate routine and would
 // cause race conditions.
-func (d *doltBinlogReplicaController) SetExecutionContext(ctx *sql.Context) {
+func (d *myBinlogReplicaController) SetExecutionContext(ctx *sql.Context) {
 	d.ctx = ctx
 }
 
 // SetEngine sets the SQL engine this replica will use when running replicated statements and
 // when loading the Catalog to find the "mysql" database.
-func (d *doltBinlogReplicaController) SetEngine(engine *sqle.Engine) {
+func (d *myBinlogReplicaController) SetEngine(engine *sqle.Engine) {
 	d.engine = engine
 	d.applier.engine = engine
 }
 
+// SetTableWriterProvider sets the table writer provider for the replica's applier to use when writing replicated
+// changes to the database.
+func (d *myBinlogReplicaController) SetTableWriterProvider(provider TableWriterProvider) {
+	d.applier.tableWriterProvider = provider
+}
+
 // StopReplica implements the BinlogReplicaController interface.
-func (d *doltBinlogReplicaController) StopReplica(ctx *sql.Context) error {
+func (d *myBinlogReplicaController) StopReplica(ctx *sql.Context) error {
 	if d.applier.IsRunning() == false {
 		ctx.Warn(3084, "Replication thread(s) for channel '' are already stopped.")
 		return nil
@@ -224,7 +230,7 @@ func (d *doltBinlogReplicaController) StopReplica(ctx *sql.Context) error {
 }
 
 // SetReplicationSourceOptions implements the BinlogReplicaController interface.
-func (d *doltBinlogReplicaController) SetReplicationSourceOptions(ctx *sql.Context, options []binlogreplication.ReplicationOption) error {
+func (d *myBinlogReplicaController) SetReplicationSourceOptions(ctx *sql.Context, options []binlogreplication.ReplicationOption) error {
 	replicaSourceInfo, err := loadReplicationConfiguration(ctx, d.engine.Analyzer.Catalog.MySQLDb)
 	if err != nil {
 		return err
@@ -290,7 +296,7 @@ func (d *doltBinlogReplicaController) SetReplicationSourceOptions(ctx *sql.Conte
 }
 
 // SetReplicationFilterOptions implements the BinlogReplicaController interface.
-func (d *doltBinlogReplicaController) SetReplicationFilterOptions(_ *sql.Context, options []binlogreplication.ReplicationOption) error {
+func (d *myBinlogReplicaController) SetReplicationFilterOptions(_ *sql.Context, options []binlogreplication.ReplicationOption) error {
 	for _, option := range options {
 		switch strings.ToUpper(option.Name) {
 		case "REPLICATE_DO_TABLE":
@@ -326,7 +332,7 @@ func (d *doltBinlogReplicaController) SetReplicationFilterOptions(_ *sql.Context
 }
 
 // GetReplicaStatus implements the BinlogReplicaController interface
-func (d *doltBinlogReplicaController) GetReplicaStatus(ctx *sql.Context) (*binlogreplication.ReplicaStatus, error) {
+func (d *myBinlogReplicaController) GetReplicaStatus(ctx *sql.Context) (*binlogreplication.ReplicaStatus, error) {
 	replicaSourceInfo, err := loadReplicationConfiguration(ctx, d.engine.Analyzer.Catalog.MySQLDb)
 	if err != nil {
 		return nil, err
@@ -359,7 +365,7 @@ func (d *doltBinlogReplicaController) GetReplicaStatus(ctx *sql.Context) (*binlo
 }
 
 // ResetReplica implements the BinlogReplicaController interface
-func (d *doltBinlogReplicaController) ResetReplica(ctx *sql.Context, resetAll bool) error {
+func (d *myBinlogReplicaController) ResetReplica(ctx *sql.Context, resetAll bool) error {
 	d.operationMutex.Lock()
 	defer d.operationMutex.Unlock()
 
@@ -392,14 +398,14 @@ func (d *doltBinlogReplicaController) ResetReplica(ctx *sql.Context, resetAll bo
 // updateStatus allows the caller to safely update the replica controller's status. The controller locks it's mutex
 // before the specified function |f| is called, and unlocks it after |f| is finished running. The current status is
 // passed into the callback function |f| and the caller can safely update or copy any fields they need.
-func (d *doltBinlogReplicaController) updateStatus(f func(status *binlogreplication.ReplicaStatus)) {
+func (d *myBinlogReplicaController) updateStatus(f func(status *binlogreplication.ReplicaStatus)) {
 	d.statusMutex.Lock()
 	defer d.statusMutex.Unlock()
 	f(&d.status)
 }
 
 // setIoError updates the current replication status with the specific |errno| and |message| to describe an IO error.
-func (d *doltBinlogReplicaController) setIoError(errno uint, message string) {
+func (d *myBinlogReplicaController) setIoError(errno uint, message string) {
 	d.statusMutex.Lock()
 	defer d.statusMutex.Unlock()
 
@@ -415,7 +421,7 @@ func (d *doltBinlogReplicaController) setIoError(errno uint, message string) {
 }
 
 // setSqlError updates the current replication status with the specific |errno| and |message| to describe an SQL error.
-func (d *doltBinlogReplicaController) setSqlError(errno uint, message string) {
+func (d *myBinlogReplicaController) setSqlError(errno uint, message string) {
 	d.statusMutex.Lock()
 	defer d.statusMutex.Unlock()
 
@@ -434,7 +440,7 @@ func (d *doltBinlogReplicaController) setSqlError(errno uint, message string) {
 // replication is not configured, hasn't been started, or has been stopped before the server was
 // shutdown, then this method will not start replication. This method should only be called during
 // the server startup process and should not be invoked after that.
-func (d *doltBinlogReplicaController) AutoStart(_ context.Context) error {
+func (d *myBinlogReplicaController) AutoStart(_ context.Context) error {
 	runningState, err := loadReplicationRunningState(d.ctx)
 	if err != nil {
 		logrus.Errorf("Unable to load replication running state: %s", err.Error())

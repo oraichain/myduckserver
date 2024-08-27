@@ -15,13 +15,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/server"
-	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/sirupsen/logrus"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -61,24 +59,17 @@ func main() {
 	builder := &DuckBuilder{provider: provider, base: engine.Analyzer.ExecBuilder}
 	engine.Analyzer.ExecBuilder = builder
 
-	session := memory.NewSession(sql.NewBaseSession(), provider)
-	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
-	ctx.SetCurrentDatabase("mysql")
-
-	// This variable may be found in the "users_example.go" file. Please refer to that file for a walkthrough on how to
-	// set up the "mysql" database to allow user creation and user checking when establishing connections. This is set
-	// to false for this example, but feel free to play around with it and see how it works.
-	if enableUsers {
-		if err := enableUserAccounts(ctx, engine); err != nil {
-			panic(err)
-		}
+	if err := setPersister(provider, engine); err != nil {
+		logrus.Fatalln("Failed to set the persister:", err)
 	}
+
+	registerReplicaController(provider, engine)
 
 	config := server.Config{
 		Protocol: "tcp",
 		Address:  fmt.Sprintf("%s:%d", address, port),
 	}
-	s, err := server.NewServerWithHandler(config, engine, memory.NewSessionBuilder(provider), nil, wrapHandler(builder))
+	s, err := server.NewServerWithHandler(config, engine, wrapSessionBuilder(provider), nil, wrapHandler(builder))
 	if err != nil {
 		panic(err)
 	}

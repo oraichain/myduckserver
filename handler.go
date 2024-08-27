@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	stdsql "database/sql"
 	"fmt"
 
@@ -41,17 +42,10 @@ func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
 }
 
 func (h *MyHandler) ComInitDB(c *mysql.Conn, schemaName string) error {
-	conn, err := h.builder.GetConn(c.ConnectionID)
+	_, err := h.builder.GetConn(context.Background(), c.ConnectionID, schemaName)
 	if err != nil {
 		return err
 	}
-
-	if schemaName != "" {
-		if _, err := conn.Exec("USE " + dbName + "." + schemaName); err != nil {
-			logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
-		}
-	}
-
 	return h.Handler.ComInitDB(c, schemaName)
 }
 

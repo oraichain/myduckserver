@@ -1,3 +1,5 @@
 myduckserver
 *.db
 *.wal
+*.bin
+*.log
