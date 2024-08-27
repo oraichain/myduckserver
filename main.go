@@ -15,6 +15,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 
 	sqle "github.com/dolthub/go-mysql-server"
@@ -56,7 +57,17 @@ func main() {
 		logrus.Fatalln("Failed to load the database:", err)
 	}
 
-	builder := &DuckBuilder{provider: provider, base: engine.Analyzer.ExecBuilder}
+	db, err := sql.Open("duckdb", dbFile)
+	if err != nil {
+		logrus.Fatalln("Failed to open the database:", err)
+	}
+	defer db.Close()
+
+	builder := &DuckBuilder{
+		provider: provider,
+		base:     engine.Analyzer.ExecBuilder,
+		db:       db,
+	}
 	engine.Analyzer.ExecBuilder = builder
 
 	if err := setPersister(provider, engine); err != nil {

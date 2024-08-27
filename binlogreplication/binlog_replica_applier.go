@@ -363,7 +363,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			"query":    query.SQL,
 			"options":  fmt.Sprintf("0x%x", query.Options),
 			"sql_mode": fmt.Sprintf("0x%x", query.SqlMode),
-		}).Trace("Received binlog event: Query")
+		}).Infoln("Received binlog event: Query")
 
 		// When executing SQL statements sent from the primary, we can't be sure what database was modified unless we
 		// look closely at the statement. For example, we could be connected to db01, but executed
@@ -665,6 +665,13 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 			return err
 		}
 	}
+
+	ctx.GetLogger().WithFields(logrus.Fields{
+		"db":    tableMap.Database,
+		"table": tableName,
+		"event": eventType,
+		"rows":  len(rows.Rows),
+	}).Infoln("processRowEvent")
 
 	return tableWriter.Close()
 }

@@ -3,3 +3,4 @@ myduckserver
 *.wal
 *.bin
 *.log
+.replica/

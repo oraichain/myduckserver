@@ -32,7 +32,7 @@ type MyHandler struct {
 func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
 	entry, ok := h.builder.conns.Load(c.ConnectionID)
 	if ok {
-		conn := entry.(*stdsql.DB)
+		conn := entry.(*stdsql.Conn)
 		if err := conn.Close(); err != nil {
 			logrus.Warn("Failed to close connection:", err)
 		}

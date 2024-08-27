@@ -76,16 +76,8 @@ func (twp *tableWriterProvider) newTableAppender(
 		return nil, err
 	}
 
-	tx, err := conn.(driver.ConnBeginTx).BeginTx(ctx.Context, driver.TxOptions{})
-	if err != nil {
-		conn.Close()
-		connector.Close()
-		return nil, err
-	}
-
 	appender, err := duckdb.NewAppenderFromConn(conn, databaseName, tableName)
 	if err != nil {
-		tx.Rollback()
 		conn.Close()
 		connector.Close()
 		return nil, err
@@ -94,7 +86,6 @@ func (twp *tableWriterProvider) newTableAppender(
 	return &tableAppender{
 		connector: connector,
 		conn:      conn,
-		tx:        tx,
 		appender:  appender,
 		buffer:    make([]driver.Value, columnCount),
 	}, nil
@@ -103,7 +94,6 @@ func (twp *tableWriterProvider) newTableAppender(
 type tableAppender struct {
 	connector *duckdb.Connector
 	conn      driver.Conn
-	tx        driver.Tx
 	appender  *duckdb.Appender
 	buffer    []driver.Value
 }
@@ -128,7 +118,6 @@ func (ta *tableAppender) Update(ctx *sql.Context, keys sql.Row, values sql.Row) 
 func (ta *tableAppender) Close() error {
 	defer ta.connector.Close()
 	defer ta.conn.Close()
-	defer ta.tx.Commit()
 	return ta.appender.Close()
 }
 
@@ -225,12 +214,8 @@ func (tu *tableUpdater) Delete(ctx *sql.Context, keys sql.Row) error {
 
 func (tu *tableUpdater) Update(ctx *sql.Context, keys sql.Row, values sql.Row) error {
 	args := make([]interface{}, len(keys)+len(values))
-	for i, v := range keys {
-		args[i] = v
-	}
-	for i, v := range values {
-		args[i+len(keys)] = v
-	}
+	copy(args, keys)
+	copy(args[len(keys):], values)
 	_, err := tu.stmt.ExecContext(ctx.Context, args...)
 	return err
 }

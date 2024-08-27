@@ -60,13 +60,16 @@ func TestDuckBuilder_Select(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session), sql.WithQuery("SELECT * FROM test_table"))
 
@@ -105,13 +108,16 @@ func TestDuckBuilder_Insert(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("INSERT INTO test_table (id, name) VALUES (1, 'test')"))
@@ -152,13 +158,16 @@ func TestDuckBuilder_CreateTable(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("CREATE TABLE test_table (id INT, name VARCHAR(255))"))
@@ -208,13 +217,16 @@ func TestDuckBuilder_DropTable(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("DROP TABLE test_table"))
@@ -258,13 +270,16 @@ func TestDuckBuilder_ShowTables(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("SHOW TABLES"))
@@ -378,13 +393,16 @@ func TestDuckBuilder_CreateDatabase(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("CREATE DATABASE test_db"))
@@ -423,13 +441,16 @@ func TestDuckBuilder_DropDatabase(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
+	conn, err := db.Conn(context.Background())
+	require.NoError(t, err)
+	defer conn.Close()
 
 	provider := memory.NewDBProvider()
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     &mockNodeExecBuilder{},
 	}
-	builder.conns.Store(uint32(1), db)
+	builder.conns.Store(uint32(1), conn)
 	session := memory.NewSession(sql.NewBaseSessionWithClientServer("", sql.Client{}, 1), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session),
 		sql.WithQuery("DROP DATABASE test_db"))
