@@ -65,7 +65,7 @@ func TestLoadTables(t *testing.T) {
 	session := memory.NewSession(sql.NewBaseSession(), provider)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
 
-	_, _, err = engine.Query(ctx, "CREATE DATABASE test_schema")
+	_, _, _, err = engine.Query(ctx, "CREATE DATABASE test_schema")
 	assert.NoError(t, err)
 
 	// Mock table query

@@ -331,7 +331,7 @@ func TestDuckBuilder_ShowCreateTable(t *testing.T) {
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
 
 	engine := sqle.NewDefault(provider)
-	_, _, err := engine.Query(ctx, "CREATE DATABASE test_schema")
+	_, _, _, err := engine.Query(ctx, "CREATE DATABASE test_schema")
 	assert.NoError(t, err)
 
 	ctx.SetCurrentDatabase("test_schema")
@@ -342,7 +342,7 @@ func TestDuckBuilder_ShowCreateTable(t *testing.T) {
     name VARCHAR(255),
     PRIMARY KEY (id)
 )`
-	_, _, err = engine.Query(ctx, createTableStatement)
+	_, _, _, err = engine.Query(ctx, createTableStatement)
 	assert.NoError(t, err)
 
 	ctx = sql.NewContext(context.Background(), sql.WithSession(session),

@@ -191,7 +191,7 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 	case *plan.ShowTables:
 		duckSQL = ctx.Query()
 	default:
-		duckSQL, err = translate(ctx.Query())
+		duckSQL, err = translate(n, ctx.Query())
 	}
 	if err != nil {
 		return nil, err
@@ -216,7 +216,7 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 
 func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
 	// Translate the MySQL query to a DuckDB query
-	duckSQL, err := translate(ctx.Query())
+	duckSQL, err := translate(n, ctx.Query())
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 		duckSQL = fmt.Sprintf(`DROP SCHEMA %s "%s" CASCADE`, ifExists, n.DbName)
 	default:
 		// Translate the MySQL query to a DuckDB query
-		duckSQL, err = translate(ctx.Query())
+		duckSQL, err = translate(n, ctx.Query())
 	}
 	if err != nil {
 		return nil, err

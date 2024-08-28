@@ -17,6 +17,9 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+
+	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/plan"
 )
 
 func getPythonPath() (string, error) {
@@ -36,14 +39,35 @@ func getPythonPath() (string, error) {
 	return "", fmt.Errorf("neither python3 nor python was found in PATH")
 }
 
-// translate converts a MySQL query to a DuckDB query using SQLGlot.
+func translate(node sql.Node, sql string) (string, error) {
+	switch node.(type) {
+	case *plan.CreateTable,
+		// Convert the CREATE TABLE statement using the built-in transpiler; ignore possible create index statements for now
+		*plan.ResolvedTable,
+		// Simple SELECT statements, e.g., `SELECT * FROM tbl` or `SELECT col1, col2 FROM tbl`
+		*plan.ShowTables,
+		*plan.ShowColumns:
+		return translateBuiltIn(sql)
+	default:
+		// For other types of queries, use SQLGlot to convert the query
+		return translateWithSQLGlot(sql)
+	}
+}
+
+func translateBuiltIn(sql string) (string, error) {
+	// TODO(fan): https://github.com/dolthub/doltgresql/issues/660
+	// return transpiler.ConvertQuery(sql)[0], nil
+	return translateWithSQLGlot(sql)
+}
+
+// translateSQL converts a MySQL query to a DuckDB query using SQLGlot.
 // For simplicity, we assume that Python and SQLGlot are installed on the system.
 // Then we can call the following shell command to convert the query.
 //
 // python -c 'import sys; import sqlglot; sql = sys.stdin.read(); print(sqlglot.transpile(sql, read="mysql", write="duckdb")[0])
 //
 // In the future, we can deploy a SQLGlot server and use the API to convert the query.
-func translate(mysqlQuery string) (string, error) {
+func translateWithSQLGlot(sql string) (string, error) {
 	pythonPath, err := getPythonPath()
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -54,7 +78,7 @@ func translate(mysqlQuery string) (string, error) {
 	cmd := exec.Command(pythonPath, "-c", `import sys; import sqlglot; sql = sys.stdin.read(); print(sqlglot.transpile(sql, read="mysql", write="duckdb")[0])`)
 
 	// Set the input for the command
-	cmd.Stdin = bytes.NewBufferString(mysqlQuery)
+	cmd.Stdin = bytes.NewBufferString(sql)
 
 	// Capture the output of the command
 	var out bytes.Buffer

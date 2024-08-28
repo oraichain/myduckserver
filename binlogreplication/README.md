@@ -1,0 +1,1 @@
+The code in this directory was copied and modified from [Dolt](https://github.com/dolthub/dolt) (as of 2024-08-28, https://github.com/dolthub/dolt/tree/main/go/libraries/doltcore/sqle/binlogreplication). The original code is licensed under the Apache License, Version 2.0. The modifications are also licensed under the Apache License, Version 2.0.
