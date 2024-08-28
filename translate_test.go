@@ -41,7 +41,7 @@ func TestTranslate(t *testing.T) {
 	// Loop over each test case
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := translate(tc.input)
+			result, err := translateWithSQLGlot(tc.input)
 			if err != nil {
 				t.Errorf("translate(%q) returned an error: %v", tc.input, err)
 			}

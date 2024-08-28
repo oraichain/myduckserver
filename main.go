@@ -41,7 +41,7 @@ var (
 )
 
 func checkDependencies() {
-	_, err := translate("SELECT 1")
+	_, err := translateWithSQLGlot("SELECT 1")
 	if err != nil {
 		panic("Python and SQLGlot are required to run the server. Please install them and try again.")
 	}

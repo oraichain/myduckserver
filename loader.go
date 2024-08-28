@@ -71,7 +71,7 @@ func loadSchemas(ctx *sql.Context, conn *stdsql.DB, engine *sqle.Engine) error {
 			continue
 		}
 
-		_, iter, err := engine.Query(ctx, "CREATE DATABASE "+schemaName)
+		_, iter, _, err := engine.Query(ctx, "CREATE DATABASE "+schemaName)
 		if err != nil {
 			return err
 		}
@@ -103,7 +103,7 @@ func loadTables(ctx *sql.Context, conn *stdsql.DB, engine *sqle.Engine) error {
 		}
 
 		ctx.SetCurrentDatabase(schemaName)
-		_, iter, err := engine.Query(ctx, string(ddl))
+		_, iter, _, err := engine.Query(ctx, string(ddl))
 		if err != nil {
 			return err
 		}

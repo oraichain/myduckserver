@@ -815,12 +815,13 @@ func convertVitessJsonExpressionString(ctx *sql.Context, engine *gms.Engine, val
 		strValue = strValue[len("EXPRESSION(") : len(strValue)-1]
 	}
 
-	node, err := planbuilder.Parse(ctx, engine.Analyzer.Catalog, "SELECT "+strValue)
+	binder := planbuilder.New(ctx, engine.Analyzer.Catalog, engine.Parser)
+	node, _, _, qFlags, err := binder.Parse("SELECT "+strValue, false)
 	if err != nil {
 		return nil, err
 	}
 
-	analyze, err := engine.Analyzer.Analyze(ctx, node, nil)
+	analyze, err := engine.Analyzer.Analyze(ctx, node, nil, qFlags)
 	if err != nil {
 		return nil, err
 	}
@@ -888,7 +889,7 @@ func executeQueryWithEngine(ctx *sql.Context, engine *gms.Engine, query string) 
 		}).Warn("No current database selected")
 	}
 
-	_, iter, err := engine.Query(queryCtx, query)
+	_, iter, _, err := engine.Query(queryCtx, query)
 	if err != nil {
 		// Log any errors, except for commits with "nothing to commit"
 		if err.Error() != "nothing to commit" {
