@@ -405,9 +405,14 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			ctx.SetSessionVariable(ctx, "unique_checks", 1)
 		}
 
-		ctx.SetCurrentDatabase(query.Database)
-		executeQueryWithEngine(ctx, engine, query.SQL)
 		createCommit = strings.ToLower(query.SQL) != "begin"
+		// TODO(fan): Disable the transaction for now.
+		if createCommit {
+			if !(query.Database == "mysql" && strings.HasPrefix(query.SQL, "TRUNCATE TABLE")) {
+				ctx.SetCurrentDatabase(query.Database)
+				executeQueryWithEngine(ctx, engine, query.SQL)
+			}
+		}
 
 	case event.IsRotate():
 		// When a binary log file exceeds the configured size limit, a ROTATE_EVENT is written at the end of the file,
@@ -531,14 +536,16 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 	}
 
 	if createCommit {
-		var databasesToCommit []string
-		if commitToAllDatabases {
-			databasesToCommit = getAllUserDatabaseNames(ctx, engine)
-			for _, database := range databasesToCommit {
-				executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
-				executeQueryWithEngine(ctx, engine, "commit;")
-			}
-		}
+		// TODO(fan): Disable transaction commit for now
+		_ = commitToAllDatabases
+		// var databasesToCommit []string
+		// if commitToAllDatabases {
+		// 	databasesToCommit = getAllUserDatabaseNames(ctx, engine)
+		// 	for _, database := range databasesToCommit {
+		// 		executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
+		// 		executeQueryWithEngine(ctx, engine, "commit;")
+		// 	}
+		// }
 
 		// Record the last GTID processed after the commit
 		a.currentPosition.GTIDSet = a.currentPosition.GTIDSet.AddGTID(a.currentGtid)
@@ -575,6 +582,11 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 	tableMap, ok := a.tableMapsById[tableId]
 	if !ok {
 		return fmt.Errorf("unable to find replication metadata for table ID: %d", tableId)
+	}
+
+	// Skip processing of MySQL system tables
+	if tableMap.Database == "mysql" {
+		return nil
 	}
 
 	if a.filters.isTableFilteredOut(ctx, tableMap) {

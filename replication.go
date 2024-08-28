@@ -23,13 +23,14 @@ import (
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
 	"github.com/marcboeker/go-duckdb"
+	"github.com/sirupsen/logrus"
 
 	"github.com/apecloud/myduckserver/binlogreplication"
 )
 
 // registerReplicaController registers the replica controller into the engine
 // to handle the replication commands, such as START REPLICA, STOP REPLICA, etc.
-func registerReplicaController(provider *memory.DbProvider, engine *sqle.Engine) {
+func registerReplicaController(provider *memory.DbProvider, engine *sqle.Engine, db *stdsql.DB) {
 	replica := binlogreplication.MyBinlogReplicaController
 	replica.SetEngine(engine)
 
@@ -38,12 +39,14 @@ func registerReplicaController(provider *memory.DbProvider, engine *sqle.Engine)
 	ctx.SetCurrentDatabase("mysql")
 	replica.SetExecutionContext(ctx)
 
-	replica.SetTableWriterProvider(&tableWriterProvider{})
+	replica.SetTableWriterProvider(&tableWriterProvider{db: db})
 
 	engine.Analyzer.Catalog.BinlogReplicaController = binlogreplication.MyBinlogReplicaController
 }
 
-type tableWriterProvider struct{}
+type tableWriterProvider struct {
+	db *stdsql.DB
+}
 
 var _ binlogreplication.TableWriterProvider = &tableWriterProvider{}
 
@@ -55,9 +58,9 @@ func (twp *tableWriterProvider) GetTableWriter(
 	eventType binlogreplication.EventType,
 	foreignKeyChecksDisabled bool,
 ) (binlogreplication.TableWriter, error) {
-	if eventType == binlogreplication.InsertEvent {
-		return twp.newTableAppender(ctx, databaseName, tableName, columnCount)
-	}
+	// if eventType == binlogreplication.InsertEvent {
+	// 	return twp.newTableAppender(ctx, databaseName, tableName, columnCount)
+	// }
 	return twp.newTableUpdater(ctx, databaseName, tableName, schema, columnCount, identifyColumns, dataColumns, eventType)
 }
 
@@ -128,22 +131,18 @@ func (twp *tableWriterProvider) newTableUpdater(
 	identifyColumns, dataColumns mysql.Bitmap,
 	eventType binlogreplication.EventType,
 ) (*tableUpdater, error) {
-	db, err := stdsql.Open("duckdb", dbFile)
+	tx, err := twp.db.BeginTx(ctx.Context, nil)
 	if err != nil {
-		return nil, err
-	}
-
-	tx, err := db.BeginTx(ctx.Context, nil)
-	if err != nil {
-		db.Close()
 		return nil, err
 	}
 
 	var sql string
+	replace := false
 	fullTableName := quoteIdentifier(databaseName) + "." + quoteIdentifier(tableName)
 	keyCount, dataCount := identifyColumns.BitCount(), dataColumns.BitCount()
-	if eventType == binlogreplication.DeleteEvent {
-		sql := "DELETE FROM " + fullTableName + " WHERE "
+	switch eventType {
+	case binlogreplication.DeleteEvent:
+		sql = "DELETE FROM " + fullTableName + " WHERE "
 		count := 0
 		for i := range columnCount {
 			if !identifyColumns.Bit(i) {
@@ -155,56 +154,82 @@ func (twp *tableWriterProvider) newTableUpdater(
 				sql += " AND "
 			}
 		}
-	} else {
-		sql := "UPDATE " + fullTableName + " SET "
-		count := 0
-		for i := range columnCount {
-			if !dataColumns.Bit(i) {
-				continue
+	case binlogreplication.UpdateEvent:
+		if keyCount < columnCount || dataCount < columnCount {
+			sql = "UPDATE " + fullTableName + " SET "
+			count := 0
+			for i := range columnCount {
+				if !dataColumns.Bit(i) {
+					continue
+				}
+				sql += quoteIdentifier(schema[i].Name) + " = ?"
+				count++
+				if count < dataCount {
+					sql += ", "
+				}
 			}
-			sql += quoteIdentifier(schema[i].Name) + " = ?"
-			count++
-			if count < dataCount {
+			sql += " WHERE "
+			count = 0
+			for i := range columnCount {
+				if !identifyColumns.Bit(i) {
+					continue
+				}
+				sql += quoteIdentifier(schema[i].Name) + " = ?"
+				count++
+				if count < keyCount {
+					sql += " AND "
+				}
+			}
+		} else {
+			sql = "INSERT OR REPLACE INTO " + fullTableName + " VALUES ("
+			for i := range columnCount {
+				sql += "?"
+				if i < columnCount-1 {
+					sql += ", "
+				}
+			}
+			sql += ")"
+			replace = true
+		}
+	case binlogreplication.InsertEvent:
+		sql = "INSERT INTO " + fullTableName + " VALUES ("
+		for i := range columnCount {
+			sql += "?"
+			if i < columnCount-1 {
 				sql += ", "
 			}
 		}
-		sql += " WHERE "
-		count = 0
-		for i := range columnCount {
-			if !identifyColumns.Bit(i) {
-				continue
-			}
-			sql += quoteIdentifier(schema[i].Name) + " = ?"
-			count++
-			if count < keyCount {
-				sql += " AND "
-			}
-		}
+		sql += ")"
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"sql": sql,
+	}).Infoln("Creating table updater...")
+
 	stmt, err := tx.PrepareContext(ctx.Context, sql)
 	if err != nil {
 		tx.Rollback()
-		db.Close()
 		return nil, err
 	}
 
 	return &tableUpdater{
-		db:   db,
-		tx:   tx,
-		stmt: stmt,
+		tx:      tx,
+		stmt:    stmt,
+		replace: replace,
 	}, nil
 }
 
 type tableUpdater struct {
-	db   *stdsql.DB
-	tx   *stdsql.Tx
-	stmt *stdsql.Stmt
+	tx      *stdsql.Tx
+	stmt    *stdsql.Stmt
+	replace bool
 }
 
 var _ binlogreplication.TableWriter = &tableUpdater{}
 
 func (tu *tableUpdater) Insert(ctx *sql.Context, row sql.Row) error {
-	panic("not implemented")
+	_, err := tu.stmt.ExecContext(ctx.Context, row...)
+	return err
 }
 
 func (tu *tableUpdater) Delete(ctx *sql.Context, keys sql.Row) error {
@@ -213,6 +238,9 @@ func (tu *tableUpdater) Delete(ctx *sql.Context, keys sql.Row) error {
 }
 
 func (tu *tableUpdater) Update(ctx *sql.Context, keys sql.Row, values sql.Row) error {
+	if tu.replace {
+		return tu.Insert(ctx, values)
+	}
 	args := make([]interface{}, len(keys)+len(values))
 	copy(args, keys)
 	copy(args[len(keys):], values)
@@ -221,7 +249,6 @@ func (tu *tableUpdater) Update(ctx *sql.Context, keys sql.Row, values sql.Row) e
 }
 
 func (tu *tableUpdater) Close() error {
-	defer tu.db.Close()
 	defer tu.tx.Commit()
 	return tu.stmt.Close()
 }

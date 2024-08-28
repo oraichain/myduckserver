@@ -46,9 +46,15 @@ func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string)
 	}
 	conn := entry.(*stdsql.Conn)
 	if schemaName != "" {
-		if _, err := conn.ExecContext(ctx, "USE "+dbName+"."+schemaName); err != nil {
-			logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
+		var currentSchema string
+		if err := conn.QueryRowContext(ctx, "SELECT CURRENT_SCHEMA()").Scan(&currentSchema); err != nil {
+			logrus.WithError(err).Error("Failed to get current schema")
 			return nil, err
+		} else if currentSchema != schemaName {
+			if _, err := conn.ExecContext(ctx, "USE "+dbName+"."+schemaName); err != nil {
+				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
+				return nil, err
+			}
 		}
 	}
 	return conn, nil
@@ -191,6 +197,11 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 		return nil, err
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing Query...")
+
 	// Execute the DuckDB query
 	rows, err := conn.QueryContext(ctx.Context, duckSQL)
 	if err != nil {
@@ -204,13 +215,16 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 }
 
 func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
-	logrus.Infoln("Executing DML...")
-
 	// Translate the MySQL query to a DuckDB query
 	duckSQL, err := translate(ctx.Query())
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing DML...")
 
 	// Execute the DuckDB query
 	result, err := conn.ExecContext(ctx.Context, duckSQL)
@@ -235,8 +249,6 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn
 }
 
 func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
-	logrus.Infoln("Executing DDL...")
-
 	var (
 		duckSQL string
 		err     error
@@ -264,8 +276,12 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 		return nil, err
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing DDL...")
+
 	// Execute the DuckDB query
-	logrus.Infoln("Executing DuckDB DDL:", duckSQL)
 	_, err = conn.ExecContext(ctx.Context, duckSQL)
 	if err != nil {
 		logrus.Errorln("Failed to execute SQL in DuckDB: ", duckSQL)
@@ -322,6 +338,11 @@ func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsq
 		db := db.Database().Name()
 		name = fmt.Sprintf("%s.%s", db, name)
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"Table": name,
+		"DDL":   ddl,
+	}).Infoln("Saving table DDL...")
 
 	_, err := conn.ExecContext(ctx.Context, fmt.Sprintf("COMMENT ON TABLE %s IS '%s'", name, encoded))
 	return err
