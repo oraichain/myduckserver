@@ -55,10 +55,7 @@ const maxOffsetSize = uint32(65_535)
 // And a third-party description is here:
 // https://lafengnan.gitbooks.io/blog/content/mysql/chapter2.html
 func encodeJsonDoc(jsonDoc sql.JSONWrapper) (buffer []byte, err error) {
-	val, err := jsonDoc.ToInterface()
-	if err != nil {
-		return nil, err
-	}
+	val := jsonDoc.ToInterface()
 	typeId, encodedValue, err := encodeJsonValue(val)
 	if err != nil {
 		return nil, err

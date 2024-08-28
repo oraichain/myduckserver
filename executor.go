@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	stdsql "database/sql"
 	"encoding/base64"
 	"fmt"
@@ -29,20 +30,34 @@ import (
 type DuckBuilder struct {
 	provider sql.MutableDatabaseProvider
 	base     sql.NodeExecBuilder
-	conns    sync.Map // map[uint32]*stdsql.DB, but sync.Map is concurrent-safe
+	db       *stdsql.DB
+	conns    sync.Map // map[uint32]*stdsql.Conn, but sync.Map is concurrent-safe
 }
 
-func (b *DuckBuilder) GetConn(id uint32) (*stdsql.DB, error) {
+func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string) (*stdsql.Conn, error) {
 	entry, ok := b.conns.Load(id)
 	if !ok {
-		c, err := stdsql.Open("duckdb", dbFile)
+		c, err := b.db.Conn(ctx)
 		if err != nil {
 			return nil, err
 		}
 		b.conns.Store(id, c)
 		return c, nil
 	}
-	return entry.(*stdsql.DB), nil
+	conn := entry.(*stdsql.Conn)
+	if schemaName != "" {
+		var currentSchema string
+		if err := conn.QueryRowContext(ctx, "SELECT CURRENT_SCHEMA()").Scan(&currentSchema); err != nil {
+			logrus.WithError(err).Error("Failed to get current schema")
+			return nil, err
+		} else if currentSchema != schemaName {
+			if _, err := conn.ExecContext(ctx, "USE "+dbName+"."+schemaName); err != nil {
+				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
+				return nil, err
+			}
+		}
+	}
+	return conn, nil
 }
 
 func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.RowIter, error) {
@@ -72,14 +87,40 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 		return b.base.Build(ctx, root, r)
 	}
 
-	conn, err := b.GetConn(ctx.ID())
+	schemaName := ctx.Session.GetCurrentDatabase()
+	switch n.(type) {
+	case *plan.CreateDB:
+		schemaName = ""
+	}
+
+	conn, err := b.GetConn(ctx.Context, ctx.ID(), schemaName)
 	if err != nil {
 		return nil, err
 	}
 
 	switch node := n.(type) {
+	case *plan.Use:
+		useStmt := "USE " + fullSchemaName(dbName, node.Database().Name())
+		if _, err := conn.ExecContext(ctx.Context, useStmt); err != nil {
+			return nil, err
+		}
+		return b.base.Build(ctx, root, r)
+	case *plan.StartTransaction:
+		if _, err := conn.ExecContext(ctx.Context, "BEGIN TRANSACTION"); err != nil {
+			return nil, err
+		}
+		return b.base.Build(ctx, root, r)
+	case *plan.Commit:
+		if _, err := conn.ExecContext(ctx.Context, "COMMIT"); err != nil {
+			return nil, err
+		}
+		return b.base.Build(ctx, root, r)
+	case *plan.Set:
+		return b.base.Build(ctx, root, r)
+	case *plan.ShowVariables:
+		return b.base.Build(ctx, root, r)
 	case *plan.ShowCreateTable:
-		return b.base.Build(ctx, n, r)
+		return b.base.Build(ctx, root, r)
 	case *plan.ResolvedTable:
 		return b.executeQuery(ctx, node, conn)
 	case sql.Expressioner:
@@ -93,6 +134,11 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case *plan.RenameTable:
 		return b.executeDDL(ctx, node, nil, conn)
 	case *plan.DeleteFrom:
+		return b.executeDML(ctx, n, conn)
+	case *plan.Truncate:
+		if node.DatabaseName() == "mysql" {
+			return sql.RowsToRowIter(sql.NewRow(types.OkResult{})), nil
+		}
 		return b.executeDML(ctx, n, conn)
 	default:
 		return b.base.Build(ctx, n, r)
@@ -108,7 +154,7 @@ func (b *DuckBuilder) executeBase(ctx *sql.Context, n sql.Node, r sql.Row) error
 	}
 }
 
-func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, conn *stdsql.DB) (sql.RowIter, error) {
+func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, conn *stdsql.Conn) (sql.RowIter, error) {
 	node := n.(sql.Node)
 	switch n := n.(type) {
 	case *plan.CreateTable:
@@ -132,7 +178,7 @@ func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, 
 	}
 }
 
-func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
+func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
 	logrus.Infoln("Executing Query...")
 
 	var (
@@ -151,6 +197,11 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.DB
 		return nil, err
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing Query...")
+
 	// Execute the DuckDB query
 	rows, err := conn.QueryContext(ctx.Context, duckSQL)
 	if err != nil {
@@ -163,14 +214,17 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.DB
 	return iter, nil
 }
 
-func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
-	logrus.Infoln("Executing DML...")
-
+func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
 	// Translate the MySQL query to a DuckDB query
 	duckSQL, err := translate(ctx.Query())
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing DML...")
 
 	// Execute the DuckDB query
 	result, err := conn.ExecContext(ctx.Context, duckSQL)
@@ -194,9 +248,7 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.DB) 
 	})), nil
 }
 
-func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, conn *stdsql.DB) (sql.RowIter, error) {
-	logrus.Infoln("Executing DDL...")
-
+func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
 	var (
 		duckSQL string
 		err     error
@@ -224,10 +276,15 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 		return nil, err
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"Query":   ctx.Query(),
+		"DuckSQL": duckSQL,
+	}).Infoln("Executing DDL...")
+
 	// Execute the DuckDB query
 	_, err = conn.ExecContext(ctx.Context, duckSQL)
 	if err != nil {
-		logrus.Info("SQL to be executed in DuckDB: ", duckSQL)
+		logrus.Errorln("Failed to execute SQL in DuckDB: ", duckSQL)
 		return nil, err
 	}
 
@@ -247,7 +304,7 @@ func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, c
 	return sql.RowsToRowIter(sql.NewRow(types.OkResult{})), nil
 }
 
-func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsql.DB) error {
+func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsql.Conn) error {
 	var ddl string
 	switch table := table.(type) {
 	case *plan.CreateTable:
@@ -282,6 +339,21 @@ func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsq
 		name = fmt.Sprintf("%s.%s", db, name)
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"Table": name,
+		"DDL":   ddl,
+	}).Infoln("Saving table DDL...")
+
 	_, err := conn.ExecContext(ctx.Context, fmt.Sprintf("COMMENT ON TABLE %s IS '%s'", name, encoded))
 	return err
+}
+
+func fullSchemaName(db, schema string) string {
+	if db == "" {
+		return schema
+	}
+	if schema == "" {
+		return db
+	}
+	return db + "." + schema
 }

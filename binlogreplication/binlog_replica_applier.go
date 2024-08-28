@@ -25,7 +25,6 @@ import (
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/binlogreplication"
-	"github.com/dolthub/go-mysql-server/sql/mysql_db"
 	"github.com/dolthub/go-mysql-server/sql/planbuilder"
 	"github.com/dolthub/go-mysql-server/sql/rowexec"
 	"github.com/dolthub/go-mysql-server/sql/types"
@@ -57,6 +56,7 @@ type binlogReplicaApplier struct {
 	filters               *filterConfiguration
 	running               atomic.Bool
 	engine                *gms.Engine
+	tableWriterProvider   TableWriterProvider
 }
 
 func newBinlogReplicaApplier(filters *filterConfiguration) *binlogReplicaApplier {
@@ -86,7 +86,7 @@ func (a *binlogReplicaApplier) Go(ctx *sql.Context) {
 		a.running.Store(false)
 		if err != nil {
 			ctx.GetLogger().Errorf("unexpected error of type %T: '%v'", err, err.Error())
-			DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, err.Error())
+			MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, err.Error())
 		}
 	}()
 }
@@ -101,7 +101,7 @@ func (a *binlogReplicaApplier) IsRunning() bool {
 func (a *binlogReplicaApplier) connectAndStartReplicationEventStream(ctx *sql.Context) (*mysql.Conn, error) {
 	var maxConnectionAttempts uint64
 	var connectRetryDelay uint32
-	DoltBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
+	MyBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
 		status.ReplicaIoRunning = binlogreplication.ReplicaIoConnecting
 		status.ReplicaSqlRunning = binlogreplication.ReplicaSqlRunning
 		maxConnectionAttempts = status.SourceRetryCount
@@ -115,17 +115,17 @@ func (a *binlogReplicaApplier) connectAndStartReplicationEventStream(ctx *sql.Co
 
 		if replicaSourceInfo == nil {
 			err = ErrServerNotConfiguredAsReplica
-			DoltBinlogReplicaController.setIoError(ERFatalReplicaError, err.Error())
+			MyBinlogReplicaController.setIoError(ERFatalReplicaError, err.Error())
 			return nil, err
 		} else if replicaSourceInfo.Uuid != "" {
 			a.replicationSourceUuid = replicaSourceInfo.Uuid
 		}
 
 		if replicaSourceInfo.Host == "" {
-			DoltBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyHostname.Error())
+			MyBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyHostname.Error())
 			return nil, ErrEmptyHostname
 		} else if replicaSourceInfo.User == "" {
-			DoltBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyUsername.Error())
+			MyBinlogReplicaController.setIoError(ERFatalReplicaError, ErrEmptyUsername.Error())
 			return nil, ErrEmptyUsername
 		}
 
@@ -169,7 +169,7 @@ func (a *binlogReplicaApplier) connectAndStartReplicationEventStream(ctx *sql.Co
 		return nil, err
 	}
 
-	DoltBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
+	MyBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
 		status.ReplicaIoRunning = binlogreplication.ReplicaIoRunning
 	})
 
@@ -278,7 +278,7 @@ func (a *binlogReplicaApplier) replicaBinlogEventHandler(ctx *sql.Context) error
 			err := a.processBinlogEvent(ctx, engine, event)
 			if err != nil {
 				ctx.GetLogger().Errorf("unexpected error of type %T: '%v'", err, err.Error())
-				DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, err.Error())
+				MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, err.Error())
 			}
 
 		case err := <-eventProducer.ErrorChan():
@@ -286,7 +286,7 @@ func (a *binlogReplicaApplier) replicaBinlogEventHandler(ctx *sql.Context) error
 				badConnection := sqlError.Message == io.EOF.Error() ||
 					strings.HasPrefix(sqlError.Message, io.ErrUnexpectedEOF.Error())
 				if badConnection {
-					DoltBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
+					MyBinlogReplicaController.updateStatus(func(status *binlogreplication.ReplicaStatus) {
 						status.LastIoError = sqlError.Message
 						status.LastIoErrNumber = ERNetReadError
 						currentTime := time.Now()
@@ -300,7 +300,7 @@ func (a *binlogReplicaApplier) replicaBinlogEventHandler(ctx *sql.Context) error
 			} else {
 				// otherwise, log the error if it's something we don't expect and continue
 				ctx.GetLogger().Errorf("unexpected error of type %T: '%v'", err, err.Error())
-				DoltBinlogReplicaController.setIoError(mysql.ERUnknownError, err.Error())
+				MyBinlogReplicaController.setIoError(mysql.ERUnknownError, err.Error())
 			}
 
 		case <-a.stopReplicationChan:
@@ -330,7 +330,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			msg := fmt.Sprintf("unable to strip checksum from binlog event: '%v'", err.Error())
 			ctx.GetLogger().Error(msg)
-			DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
+			MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
 		}
 	}
 
@@ -363,7 +363,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			"query":    query.SQL,
 			"options":  fmt.Sprintf("0x%x", query.Options),
 			"sql_mode": fmt.Sprintf("0x%x", query.SqlMode),
-		}).Trace("Received binlog event: Query")
+		}).Infoln("Received binlog event: Query")
 
 		// When executing SQL statements sent from the primary, we can't be sure what database was modified unless we
 		// look closely at the statement. For example, we could be connected to db01, but executed
@@ -405,9 +405,14 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			ctx.SetSessionVariable(ctx, "unique_checks", 1)
 		}
 
-		ctx.SetCurrentDatabase(query.Database)
-		executeQueryWithEngine(ctx, engine, query.SQL)
 		createCommit = strings.ToLower(query.SQL) != "begin"
+		// TODO(fan): Disable the transaction for now.
+		if createCommit {
+			if !(query.Database == "mysql" && strings.HasPrefix(query.SQL, "TRUNCATE TABLE")) {
+				ctx.SetCurrentDatabase(query.Database)
+				executeQueryWithEngine(ctx, engine, query.SQL)
+			}
+		}
 
 	case event.IsRotate():
 		// When a binary log file exceeds the configured size limit, a ROTATE_EVENT is written at the end of the file,
@@ -502,7 +507,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			if flags != 0 {
 				msg := fmt.Sprintf("unsupported binlog protocol message: TableMap event with unsupported flags '%x'", flags)
 				ctx.GetLogger().Errorf(msg)
-				DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
+				MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
 			}
 			a.tableMapsById[tableId] = tableMap
 		}
@@ -531,14 +536,16 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 	}
 
 	if createCommit {
-		var databasesToCommit []string
-		if commitToAllDatabases {
-			databasesToCommit = getAllUserDatabaseNames(ctx, engine)
-			for _, database := range databasesToCommit {
-				executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
-				executeQueryWithEngine(ctx, engine, "commit;")
-			}
-		}
+		// TODO(fan): Disable transaction commit for now
+		_ = commitToAllDatabases
+		// var databasesToCommit []string
+		// if commitToAllDatabases {
+		// 	databasesToCommit = getAllUserDatabaseNames(ctx, engine)
+		// 	for _, database := range databasesToCommit {
+		// 		executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
+		// 		executeQueryWithEngine(ctx, engine, "commit;")
+		// 	}
+		// }
 
 		// Record the last GTID processed after the commit
 		a.currentPosition.GTIDSet = a.currentPosition.GTIDSet.AddGTID(a.currentGtid)
@@ -549,14 +556,6 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		err = positionStore.Save(ctx, a.currentPosition)
 		if err != nil {
 			return fmt.Errorf("unable to store GTID executed metadata to disk: %s", err.Error())
-		}
-
-		// For now, create a Dolt commit from every data update. Eventually, we'll want to make this configurable.
-		ctx.GetLogger().Trace("Creating Dolt commit(s)")
-		for _, database := range databasesToCommit {
-			executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
-			executeQueryWithEngine(ctx, engine,
-				fmt.Sprintf("call dolt_commit('-Am', 'Dolt binlog replica commit: GTID %s');", a.currentGtid))
 		}
 	}
 
@@ -585,6 +584,11 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 		return fmt.Errorf("unable to find replication metadata for table ID: %d", tableId)
 	}
 
+	// Skip processing of MySQL system tables
+	if tableMap.Database == "mysql" {
+		return nil
+	}
+
 	if a.filters.isTableFilteredOut(ctx, tableMap) {
 		return nil
 	}
@@ -611,23 +615,34 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 	if flags != 0 {
 		msg := fmt.Sprintf("unsupported binlog protocol message: row event with unsupported flags '%x'", flags)
 		ctx.GetLogger().Errorf(msg)
-		DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
+		MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
 	}
 	schema, tableName, err := getTableSchema(ctx, engine, tableMap.Name, tableMap.Database)
 	if err != nil {
 		return err
 	}
 
+	var typ EventType
 	switch {
 	case event.IsDeleteRows():
+		typ = DeleteEvent
 		ctx.GetLogger().Tracef(" - Deleted Rows (table: %s)", tableMap.Name)
 	case event.IsUpdateRows():
+		typ = UpdateEvent
 		ctx.GetLogger().Tracef(" - Updated Rows (table: %s)", tableMap.Name)
 	case event.IsWriteRows():
+		typ = InsertEvent
 		ctx.GetLogger().Tracef(" - Inserted Rows (table: %s)", tableMap.Name)
 	}
 
-	writeSession, tableWriter, err := getTableWriter(ctx, engine, tableName, tableMap.Database, foreignKeyChecksDisabled)
+	tableWriter, err := a.tableWriterProvider.GetTableWriter(
+		ctx, engine,
+		tableMap.Database, tableName,
+		schema, len(tableMap.Types),
+		rows.IdentifyColumns, rows.DataColumns,
+		typ,
+		foreignKeyChecksDisabled,
+	)
 	if err != nil {
 		return err
 	}
@@ -661,26 +676,21 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 		if err != nil {
 			return err
 		}
-
 	}
 
-	err = closeWriteSession(ctx, engine, tableMap.Database, writeSession)
-	if err != nil {
-		return err
-	}
+	ctx.GetLogger().WithFields(logrus.Fields{
+		"db":    tableMap.Database,
+		"table": tableName,
+		"event": eventType,
+		"rows":  len(rows.Rows),
+	}).Infoln("processRowEvent")
 
-	return nil
+	return tableWriter.Close()
 }
 
 //
 // Helper functions
 //
-
-// closeWriteSession flushes and closes the specified |writeSession| and returns an error if anything failed.
-func closeWriteSession(ctx *sql.Context, engine *gms.Engine, databaseName string, writeSession WriteSession) error {
-	// TO BE IMPLEMENTED
-	return nil
-}
 
 // getTableSchema returns a sql.Schema for the case-insensitive |tableName| in the database named
 // |databaseName|, along with the exact, case-sensitive table name.
@@ -698,18 +708,6 @@ func getTableSchema(ctx *sql.Context, engine *gms.Engine, tableName, databaseNam
 	}
 
 	return table.Schema(), table.Name(), nil
-}
-
-// getTableWriter returns a WriteSession and a TableWriter for writing to the specified |table| in the specified |database|.
-func getTableWriter(ctx *sql.Context, engine *gms.Engine, tableName, databaseName string, foreignKeyChecksDisabled bool) (WriteSession, TableWriter, error) {
-	database, err := engine.Analyzer.Catalog.Database(ctx, databaseName)
-	if err != nil {
-		return nil, nil, err
-	}
-	if privDatabase, ok := database.(mysql_db.PrivilegedDatabase); ok {
-		database = privDatabase.Unwrap()
-	}
-	return nil, nil, nil
 }
 
 // parseRow parses the binary row data from a MySQL binlog event and converts it into a go-mysql-server Row using the
@@ -882,7 +880,7 @@ func loadReplicaServerId() (uint32, error) {
 
 func executeQueryWithEngine(ctx *sql.Context, engine *gms.Engine, query string) {
 	// Create a sub-context when running queries against the engine, so that we get an accurate query start time.
-	queryCtx := sql.NewContext(ctx, sql.WithSession(ctx.Session))
+	queryCtx := sql.NewContext(ctx, sql.WithSession(ctx.Session)).WithQuery(query)
 
 	if queryCtx.GetCurrentDatabase() == "" {
 		ctx.GetLogger().WithFields(logrus.Fields{
@@ -897,9 +895,9 @@ func executeQueryWithEngine(ctx *sql.Context, engine *gms.Engine, query string) 
 			queryCtx.GetLogger().WithFields(logrus.Fields{
 				"error": err.Error(),
 				"query": query,
-			}).Errorf("Error executing query")
-			msg := fmt.Sprintf("Error executing query: %v", err.Error())
-			DoltBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
+			}).Errorf("Applying query failed")
+			msg := fmt.Sprintf("Applying query failed: %v", err.Error())
+			MyBinlogReplicaController.setSqlError(mysql.ERUnknownError, msg)
 		}
 		return
 	}
