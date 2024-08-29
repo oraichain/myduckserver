@@ -26,11 +26,12 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/apecloud/myduckserver/binlogreplication"
+	"github.com/apecloud/myduckserver/meta"
 )
 
 // registerReplicaController registers the replica controller into the engine
 // to handle the replication commands, such as START REPLICA, STOP REPLICA, etc.
-func registerReplicaController(provider *memory.DbProvider, engine *sqle.Engine, db *stdsql.DB) {
+func registerReplicaController(provider *meta.DbProvider, engine *sqle.Engine, db *stdsql.DB) {
 	replica := binlogreplication.MyBinlogReplicaController
 	replica.SetEngine(engine)
 

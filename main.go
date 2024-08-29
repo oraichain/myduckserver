@@ -15,11 +15,10 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 
+	"github.com/apecloud/myduckserver/meta"
 	sqle "github.com/dolthub/go-mysql-server"
-	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/sirupsen/logrus"
 
@@ -50,23 +49,18 @@ func checkDependencies() {
 func main() {
 	checkDependencies()
 
-	provider := memory.NewDBProvider()
-	engine := sqle.NewDefault(provider)
-
-	if err := Load(provider, engine); err != nil {
-		logrus.Fatalln("Failed to load the database:", err)
-	}
-
-	db, err := sql.Open("duckdb", dbFile)
+	provider, err := meta.NewDBProvider(dbFile)
 	if err != nil {
 		logrus.Fatalln("Failed to open the database:", err)
 	}
-	defer db.Close()
+	defer provider.Close()
+
+	engine := sqle.NewDefault(provider)
 
 	builder := &DuckBuilder{
 		provider: provider,
 		base:     engine.Analyzer.ExecBuilder,
-		db:       db,
+		db:       provider.Storage(),
 	}
 	engine.Analyzer.ExecBuilder = builder
 
@@ -74,7 +68,7 @@ func main() {
 		logrus.Fatalln("Failed to set the persister:", err)
 	}
 
-	registerReplicaController(provider, engine, db)
+	registerReplicaController(provider, engine, provider.Storage())
 
 	config := server.Config{
 		Protocol: "tcp",

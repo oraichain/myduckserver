@@ -16,9 +16,7 @@ package main
 import (
 	"context"
 	stdsql "database/sql"
-	"encoding/base64"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -86,12 +84,15 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case "SELECT DATABASE()":
 		return b.base.Build(ctx, root, r)
 	}
+	// TODO; find a better way to fallback to the base builder
+	switch n.(type) {
+	case *plan.CreateDB, *plan.DropDB, *plan.DropTable, *plan.RenameTable,
+		*plan.CreateTable, *plan.AddColumn, *plan.RenameColumn, *plan.DropColumn, *plan.ModifyColumn,
+		*plan.ShowTables, *plan.ShowCreateTable:
+		return b.base.Build(ctx, root, r)
+	}
 
 	schemaName := ctx.Session.GetCurrentDatabase()
-	switch n.(type) {
-	case *plan.CreateDB:
-		schemaName = ""
-	}
 
 	conn, err := b.GetConn(ctx.Context, ctx.ID(), schemaName)
 	if err != nil {
@@ -119,20 +120,11 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 		return b.base.Build(ctx, root, r)
 	case *plan.ShowVariables:
 		return b.base.Build(ctx, root, r)
-	case *plan.ShowCreateTable:
-		return b.base.Build(ctx, root, r)
-	case *plan.ResolvedTable:
+	// SubqueryAlias is for select * from view
+	case *plan.ResolvedTable, *plan.SubqueryAlias:
 		return b.executeQuery(ctx, node, conn)
 	case sql.Expressioner:
 		return b.executeExpressioner(ctx, node, conn)
-	case *plan.CreateDB:
-		return b.executeDDL(ctx, node, nil, conn)
-	case *plan.DropDB:
-		return b.executeDDL(ctx, node, nil, conn)
-	case *plan.DropTable:
-		return b.executeDDL(ctx, node, nil, conn)
-	case *plan.RenameTable:
-		return b.executeDDL(ctx, node, nil, conn)
 	case *plan.DeleteFrom:
 		return b.executeDML(ctx, n, conn)
 	case *plan.Truncate:
@@ -145,34 +137,13 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	}
 }
 
-func (b *DuckBuilder) executeBase(ctx *sql.Context, n sql.Node, r sql.Row) error {
-	if iter, err := b.base.Build(ctx, n, r); err != nil {
-		return err
-	} else {
-		_, err = sql.RowIterToRows(ctx, iter)
-		return err
-	}
-}
-
 func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, conn *stdsql.Conn) (sql.RowIter, error) {
 	node := n.(sql.Node)
 	switch n := n.(type) {
-	case *plan.CreateTable:
-		return b.executeDDL(ctx, n, n, conn)
-	case *plan.AddColumn:
-		return b.executeDDL(ctx, n, n.Table, conn)
-	case *plan.RenameColumn:
-		return b.executeDDL(ctx, n, n.Table, conn)
-	case *plan.DropColumn:
-		return b.executeDDL(ctx, n, n.Table, conn)
-	case *plan.ModifyColumn:
-		return b.executeDDL(ctx, n, n.Table, conn)
 	case *plan.InsertInto:
 		return b.executeDML(ctx, n, conn)
 	case *plan.Update:
 		return b.executeDML(ctx, n, conn)
-	case *plan.ShowTables:
-		return b.executeQuery(ctx, node, conn)
 	default:
 		return b.executeQuery(ctx, node, conn)
 	}
@@ -246,106 +217,6 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn
 		RowsAffected: uint64(affected),
 		InsertID:     uint64(insertId),
 	})), nil
-}
-
-func (b *DuckBuilder) executeDDL(ctx *sql.Context, n sql.Node, table sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
-	var (
-		duckSQL string
-		err     error
-	)
-	switch n := n.(type) {
-	case *plan.CreateDB:
-		// Create a schema in DuckDB
-		ifNotExists := ""
-		if n.IfNotExists {
-			ifNotExists = "IF NOT EXISTS"
-		}
-		duckSQL = fmt.Sprintf(`CREATE SCHEMA %s "%s"`, ifNotExists, n.DbName)
-	case *plan.DropDB:
-		// Drop a schema in DuckDB
-		ifExists := ""
-		if n.IfExists {
-			ifExists = "IF EXISTS"
-		}
-		duckSQL = fmt.Sprintf(`DROP SCHEMA %s "%s" CASCADE`, ifExists, n.DbName)
-	default:
-		// Translate the MySQL query to a DuckDB query
-		duckSQL, err = translate(n, ctx.Query())
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"Query":   ctx.Query(),
-		"DuckSQL": duckSQL,
-	}).Infoln("Executing DDL...")
-
-	// Execute the DuckDB query
-	_, err = conn.ExecContext(ctx.Context, duckSQL)
-	if err != nil {
-		logrus.Errorln("Failed to execute SQL in DuckDB: ", duckSQL)
-		return nil, err
-	}
-
-	// Execute the DDL in the memory engine as well
-	if err := b.executeBase(ctx, n, nil); err != nil {
-		return nil, err
-	}
-
-	// Save the table DDL to the DuckDB database
-	if table != nil {
-		err = b.SaveTableDDL(ctx, table, conn)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return sql.RowsToRowIter(sql.NewRow(types.OkResult{})), nil
-}
-
-func (b *DuckBuilder) SaveTableDDL(ctx *sql.Context, table sql.Node, conn *stdsql.Conn) error {
-	var ddl string
-	switch table := table.(type) {
-	case *plan.CreateTable:
-		ddl = ctx.Query()
-	default:
-		showCtx := ctx.WithQuery("SHOW CREATE TABLE " + table.(sql.Nameable).Name())
-		showNode, _ := plan.NewShowCreateTable(table, false).WithTargetSchema(table.Schema())
-		iter, err := b.base.Build(showCtx, showNode, nil)
-		if err != nil {
-			return err
-		}
-		rows, err := sql.RowIterToRows(ctx, iter)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 {
-			return fmt.Errorf("no rows returned from SHOW CREATE TABLE")
-		}
-
-		var lines []string
-		for _, row := range rows {
-			lines = append(lines, row[1].(string))
-		}
-		ddl = strings.Join(lines, "\n")
-	}
-
-	encoded := base64.StdEncoding.EncodeToString([]byte(ddl))
-
-	name := table.(sql.Nameable).Name()
-	if db, ok := table.(sql.Databaser); ok {
-		db := db.Database().Name()
-		name = fmt.Sprintf("%s.%s", db, name)
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"Table": name,
-		"DDL":   ddl,
-	}).Infoln("Saving table DDL...")
-
-	_, err := conn.ExecContext(ctx.Context, fmt.Sprintf("COMMENT ON TABLE %s IS '%s'", name, encoded))
-	return err
 }
 
 func fullSchemaName(db, schema string) string {
