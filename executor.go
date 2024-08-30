@@ -20,7 +20,9 @@ import (
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/plan"
+	"github.com/dolthub/go-mysql-server/sql/transform"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/sirupsen/logrus"
 )
@@ -79,8 +81,6 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 	// Handle special queries
 	switch ctx.Query() {
-	case "select @@version_comment limit 1":
-		return b.base.Build(ctx, root, r)
 	case "SELECT DATABASE()":
 		return b.base.Build(ctx, root, r)
 	}
@@ -88,7 +88,22 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	switch n.(type) {
 	case *plan.CreateDB, *plan.DropDB, *plan.DropTable, *plan.RenameTable,
 		*plan.CreateTable, *plan.AddColumn, *plan.RenameColumn, *plan.DropColumn, *plan.ModifyColumn,
-		*plan.ShowTables, *plan.ShowCreateTable:
+		*plan.ShowTables, *plan.ShowCreateTable,
+		*plan.ShowBinlogs, *plan.ShowBinlogStatus, *plan.ShowWarnings:
+		return b.base.Build(ctx, root, r)
+	}
+
+	// Fallback to the base builder if the plan contains system/user variables
+	foundVariable := false
+	transform.InspectExpressions(n, func(e sql.Expression) bool {
+		switch e.(type) {
+		case *expression.SystemVar, *expression.UserVar:
+			foundVariable = true
+			return false
+		}
+		return true
+	})
+	if foundVariable {
 		return b.base.Build(ctx, root, r)
 	}
 

@@ -15,6 +15,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 
 	"github.com/apecloud/myduckserver/meta"
@@ -46,7 +47,13 @@ func checkDependencies() {
 	}
 }
 
+func init() {
+	flag.StringVar(&address, "address", address, "The address to bind to.")
+	flag.IntVar(&port, "port", port, "The port to bind to.")
+}
+
 func main() {
+	flag.Parse()
 	checkDependencies()
 
 	provider, err := meta.NewDBProvider(dbFile)

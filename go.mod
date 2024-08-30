@@ -4,17 +4,25 @@ go 1.22.4
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/Shopify/toxiproxy/v2 v2.9.0
 	github.com/dolthub/doltgresql v0.11.1
 	github.com/dolthub/go-mysql-server v0.18.2-0.20240815142344-761713e36043
 	github.com/dolthub/vitess v0.0.0-20240807181005-71d735078e24
+	github.com/go-sql-driver/mysql v1.8.1
+	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.10.9
 	github.com/marcboeker/go-duckdb v1.7.1
+	github.com/prometheus/client_golang v1.19.0
+	github.com/rs/zerolog v1.33.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.9.0
+	gopkg.in/src-d/go-errors.v1 v1.0.0
 )
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/apache/arrow/go/v17 v17.0.0 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cockroachdb/apd/v2 v2.0.3-0.20200518165714-d020e156310a // indirect
 	github.com/cockroachdb/errors v1.7.5 // indirect
@@ -33,19 +41,26 @@ require (
 	github.com/google/flatbuffers v24.3.25+incompatible // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
-	github.com/kr/pretty v0.3.0 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lestrrat-go/strftime v1.0.4 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pierrre/geohash v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/prometheus/client_model v0.6.0 // indirect
+	github.com/prometheus/common v0.50.0 // indirect
+	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
+	github.com/rs/xid v1.5.0 // indirect
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/tetratelabs/wazero v1.1.0 // indirect
 	github.com/twpayne/go-geom v1.3.6 // indirect
@@ -65,6 +80,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 	google.golang.org/grpc v1.63.2 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
-	gopkg.in/src-d/go-errors.v1 v1.0.0 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

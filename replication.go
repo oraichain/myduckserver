@@ -125,6 +125,15 @@ func (ta *tableAppender) Close() error {
 	return ta.appender.Close()
 }
 
+func isPkUpdate(schema sql.Schema, identifyColumns, dataColumns mysql.Bitmap) bool {
+	for i, c := range schema {
+		if c.PrimaryKey && identifyColumns.Bit(i) && dataColumns.Bit(i) {
+			return true
+		}
+	}
+	return false
+}
+
 func (twp *tableWriterProvider) newTableUpdater(
 	ctx *sql.Context,
 	databaseName, tableName string,
@@ -156,7 +165,7 @@ func (twp *tableWriterProvider) newTableUpdater(
 			}
 		}
 	case binlogreplication.UpdateEvent:
-		if keyCount < columnCount || dataCount < columnCount {
+		if keyCount < columnCount || dataCount < columnCount || isPkUpdate(schema, identifyColumns, dataColumns) {
 			sql = "UPDATE " + fullTableName + " SET "
 			count := 0
 			for i := range columnCount {
@@ -242,9 +251,10 @@ func (tu *tableUpdater) Update(ctx *sql.Context, keys sql.Row, values sql.Row) e
 	if tu.replace {
 		return tu.Insert(ctx, values)
 	}
+	// UPDATE t SET col1 = ?, col2 = ? WHERE key1 = ? AND key2 = ?
 	args := make([]interface{}, len(keys)+len(values))
-	copy(args, keys)
-	copy(args[len(keys):], values)
+	copy(args, values)
+	copy(args[len(values):], keys)
 	_, err := tu.stmt.ExecContext(ctx.Context, args...)
 	return err
 }

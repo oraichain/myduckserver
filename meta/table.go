@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/marcboeker/go-duckdb"
 )
 
 type Table struct {
@@ -15,6 +16,7 @@ type Table struct {
 }
 
 var _ sql.Table = (*Table)(nil)
+var _ sql.PrimaryKeyTable = (*Table)(nil)
 var _ sql.AlterableTable = (*Table)(nil)
 var _ sql.InsertableTable = (*Table)(nil)
 var _ sql.UpdatableTable = (*Table)(nil)
@@ -52,6 +54,12 @@ func (t *Table) Schema() sql.Schema {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	schema := t.schema()
+	setPrimaryKeyColumns(schema, t.primaryKeyOrdinals())
+	return schema
+}
+
+func (t *Table) schema() sql.Schema {
 	rows, err := t.db.engine.Query(`
 		SELECT column_name, data_type, is_nullable, column_default, numeric_precision, numeric_scale FROM duckdb_columns() WHERE schema_name = ? AND table_name = ?
 	`, t.db.name, t.name)
@@ -94,9 +102,49 @@ func (t *Table) Schema() sql.Schema {
 	return schema
 }
 
+func setPrimaryKeyColumns(schema sql.Schema, ordinals []int) {
+	for _, idx := range ordinals {
+		schema[idx].PrimaryKey = true
+	}
+}
+
 // String implements sql.Table.
 func (t *Table) String() string {
 	return t.name
+}
+
+// PrimaryKeySchema implements sql.PrimaryKeyTable.
+func (t *Table) PrimaryKeySchema() sql.PrimaryKeySchema {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	schema := t.schema()
+	ordinals := t.primaryKeyOrdinals()
+	setPrimaryKeyColumns(schema, ordinals)
+	return sql.NewPrimaryKeySchema(schema, ordinals...)
+}
+
+func (t *Table) primaryKeyOrdinals() []int {
+	rows, err := t.db.engine.Query(`
+		SELECT constraint_column_indexes FROM duckdb_constraints() WHERE schema_name = ? AND table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1
+	`, t.db.name, t.name)
+	if err != nil {
+		panic(ErrDuckDB.New(err))
+	}
+	defer rows.Close()
+
+	var ordinals []int
+	if rows.Next() {
+		var arr duckdb.Composite[[]int]
+		if err := rows.Scan(&arr); err != nil {
+			panic(ErrDuckDB.New(err))
+		}
+		ordinals = arr.Get()
+	}
+	if err := rows.Err(); err != nil {
+		panic(ErrDuckDB.New(err))
+	}
+	return ordinals
 }
 
 // AddColumn implements sql.AlterableTable.
