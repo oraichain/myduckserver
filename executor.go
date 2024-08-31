@@ -28,30 +28,42 @@ import (
 )
 
 type DuckBuilder struct {
-	provider sql.MutableDatabaseProvider
-	base     sql.NodeExecBuilder
-	db       *stdsql.DB
-	conns    sync.Map // map[uint32]*stdsql.Conn, but sync.Map is concurrent-safe
+	base        sql.NodeExecBuilder
+	db          *stdsql.DB
+	catalogName string
+	conns       sync.Map // map[uint32]*stdsql.Conn, but sync.Map is concurrent-safe
+}
+
+func NewDuckBuilder(base sql.NodeExecBuilder, db *stdsql.DB, catalogName string) *DuckBuilder {
+	return &DuckBuilder{
+		base:        base,
+		db:          db,
+		catalogName: catalogName,
+	}
 }
 
 func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string) (*stdsql.Conn, error) {
 	entry, ok := b.conns.Load(id)
+	conn := (*stdsql.Conn)(nil)
+
 	if !ok {
 		c, err := b.db.Conn(ctx)
 		if err != nil {
 			return nil, err
 		}
 		b.conns.Store(id, c)
-		return c, nil
+		conn = c
+	} else {
+		conn = entry.(*stdsql.Conn)
 	}
-	conn := entry.(*stdsql.Conn)
+
 	if schemaName != "" {
 		var currentSchema string
 		if err := conn.QueryRowContext(ctx, "SELECT CURRENT_SCHEMA()").Scan(&currentSchema); err != nil {
 			logrus.WithError(err).Error("Failed to get current schema")
 			return nil, err
 		} else if currentSchema != schemaName {
-			if _, err := conn.ExecContext(ctx, "USE "+dbName+"."+schemaName); err != nil {
+			if _, err := conn.ExecContext(ctx, "USE "+b.catalogName+"."+schemaName); err != nil {
 				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
 				return nil, err
 			}
@@ -116,7 +128,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 	switch node := n.(type) {
 	case *plan.Use:
-		useStmt := "USE " + fullSchemaName(dbName, node.Database().Name())
+		useStmt := "USE " + fullSchemaName(b.catalogName, node.Database().Name())
 		if _, err := conn.ExecContext(ctx.Context, useStmt); err != nil {
 			return nil, err
 		}

@@ -12,13 +12,21 @@ import (
 )
 
 type DbProvider struct {
-	mu      *sync.RWMutex
-	storage *stdsql.DB
-	name    string // also used as the database name in duckdb
+	mu          *sync.RWMutex
+	storage     *stdsql.DB
+	catalogName string
 }
 
 var _ sql.DatabaseProvider = (*DbProvider)(nil)
 var _ sql.MutableDatabaseProvider = (*DbProvider)(nil)
+
+func NewInMemoryDBProvider() *DbProvider {
+	prov, err := NewDBProvider("")
+	if err != nil {
+		panic(err)
+	}
+	return prov
+}
 
 func NewDBProvider(dbFile string) (*DbProvider, error) {
 	dbFile = strings.TrimSpace(dbFile)
@@ -35,9 +43,9 @@ func NewDBProvider(dbFile string) (*DbProvider, error) {
 		return nil, err
 	}
 	return &DbProvider{
-		mu:      &sync.RWMutex{},
-		storage: storage,
-		name:    name,
+		mu:          &sync.RWMutex{},
+		storage:     storage,
+		catalogName: name,
 	}, nil
 }
 
@@ -49,12 +57,16 @@ func (prov *DbProvider) Storage() *stdsql.DB {
 	return prov.storage
 }
 
+func (prov *DbProvider) CatalogName() string {
+	return prov.catalogName
+}
+
 // AllDatabases implements sql.DatabaseProvider.
 func (prov *DbProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	rows, err := prov.storage.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", prov.name)
+	rows, err := prov.storage.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", prov.catalogName)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
@@ -87,7 +99,7 @@ func (prov *DbProvider) Database(ctx *sql.Context, name string) (sql.Database, e
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(prov.storage, prov.name, name)
+	ok, err := hasDatabase(prov.storage, prov.catalogName, name)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +115,7 @@ func (prov *DbProvider) HasDatabase(ctx *sql.Context, name string) bool {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(prov.storage, prov.name, name)
+	ok, err := hasDatabase(prov.storage, prov.catalogName, name)
 	if err != nil {
 		panic(err)
 	}

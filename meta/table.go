@@ -60,7 +60,7 @@ func (t *Table) Schema() sql.Schema {
 }
 
 func (t *Table) schema() sql.Schema {
-	rows, err := t.db.engine.Query(`
+	rows, err := t.db.storage.Query(`
 		SELECT column_name, data_type, is_nullable, column_default, numeric_precision, numeric_scale FROM duckdb_columns() WHERE schema_name = ? AND table_name = ?
 	`, t.db.name, t.name)
 	if err != nil {
@@ -125,7 +125,7 @@ func (t *Table) PrimaryKeySchema() sql.PrimaryKeySchema {
 }
 
 func (t *Table) primaryKeyOrdinals() []int {
-	rows, err := t.db.engine.Query(`
+	rows, err := t.db.storage.Query(`
 		SELECT constraint_column_indexes FROM duckdb_constraints() WHERE schema_name = ? AND table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1
 	`, t.db.name, t.name)
 	if err != nil {
@@ -167,7 +167,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 		sql += fmt.Sprintf(" DEFAULT %s", column.Default.String())
 	}
 
-	_, err = t.db.engine.Exec(sql)
+	_, err = t.db.storage.Exec(sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -182,7 +182,7 @@ func (t *Table) DropColumn(ctx *sql.Context, columnName string) error {
 
 	sql := fmt.Sprintf(`ALTER TABLE "%s"."%s" DROP COLUMN "%s"`, t.db.name, t.name, columnName)
 
-	_, err := t.db.engine.Exec(sql)
+	_, err := t.db.storage.Exec(sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -216,7 +216,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 		sql += " DROP DEFAULT"
 	}
 
-	_, err = t.db.engine.Exec(sql)
+	_, err = t.db.storage.Exec(sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}

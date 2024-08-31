@@ -36,8 +36,7 @@ import (
 var (
 	address = "localhost"
 	port    = 3306
-	dbName  = "mysql"
-	dbFile  = dbName + ".db"
+	dbFile  = "mysql.db"
 )
 
 func checkDependencies() {
@@ -64,11 +63,7 @@ func main() {
 
 	engine := sqle.NewDefault(provider)
 
-	builder := &DuckBuilder{
-		provider: provider,
-		base:     engine.Analyzer.ExecBuilder,
-		db:       provider.Storage(),
-	}
+	builder := NewDuckBuilder(engine.Analyzer.ExecBuilder, provider.Storage(), provider.CatalogName())
 	engine.Analyzer.ExecBuilder = builder
 
 	if err := setPersister(provider, engine); err != nil {
