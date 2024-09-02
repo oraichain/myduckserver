@@ -59,7 +59,7 @@ type DuckHarness struct {
 
 var _ enginetest.Harness = (*DuckHarness)(nil)
 
-// var _ enginetest.IndexDriverHarness = (*DuckHarness)(nil)
+var _ enginetest.IndexDriverHarness = (*DuckHarness)(nil)
 var _ enginetest.IndexHarness = (*DuckHarness)(nil)
 var _ enginetest.ForeignKeyHarness = (*DuckHarness)(nil)
 var _ enginetest.KeylessTableHarness = (*DuckHarness)(nil)
@@ -92,7 +92,7 @@ func NewDuckHarness(name string, parallelism int, numTablePartitions int, useNat
 }
 
 func NewDefaultDuckHarness() *DuckHarness {
-	return NewDuckHarness("default", 1, testNumPartitions, false, nil)
+	return NewDuckHarness("default", 1, testNumPartitions, true, nil)
 }
 
 // func NewReadOnlyDuckHarness() *DuckHarness {
@@ -126,11 +126,11 @@ func (m *DuckHarness) ExternalStoredProcedures(_ *sql.Context, name string) ([]s
 	return m.externalProcedureRegistry.LookupByName(name)
 }
 
-// func (m *DuckHarness) InitializeIndexDriver(dbs []sql.Database) {
-// 	if m.indexDriverInitializer != nil {
-// 		m.driver = m.indexDriverInitializer(dbs)
-// 	}
-// }
+func (m *DuckHarness) InitializeIndexDriver(dbs []sql.Database) {
+	if m.indexDriverInitializer != nil {
+		m.driver = m.indexDriverInitializer(dbs)
+	}
+}
 
 func (m *DuckHarness) NewSession() *sql.Context {
 	m.session = m.newSession()
@@ -196,6 +196,7 @@ func (m *DuckHarness) NewEngine(t *testing.T) (enginetest.QueryEngine, error) {
 	return engine, nil
 }
 
+// copy from go-mysql-server/enginetest/initialization.go
 // NewEngine creates an engine and sets it up for testing using harness, provider, and setup data given.
 func NewEngine(t *testing.T, harness enginetest.Harness, dbProvider sql.DatabaseProvider, setupData []setup.SetupScript, statsProvider sql.StatsProvider) (*sqle.Engine, error) {
 	e := enginetest.NewEngineWithProvider(t, harness, dbProvider)
@@ -216,31 +217,7 @@ func NewEngine(t *testing.T, harness enginetest.Harness, dbProvider sql.Database
 	if len(setupData) == 0 {
 		setupData = setup.MydbData
 	}
-	return RunSetupScripts(ctx, e, setupData, supportsIndexes)
-}
-
-// RunSetupScripts runs the given setup scripts on the given engine, returning any error
-func RunSetupScripts(ctx *sql.Context, e *sqle.Engine, scripts []setup.SetupScript, createIndexes bool) (*sqle.Engine, error) {
-	for i := range scripts {
-		for _, s := range scripts[i] {
-			if !createIndexes {
-				if strings.Contains(s, "create index") || strings.Contains(s, "create unique index") {
-					continue
-				}
-			}
-			// ctx.GetLogger().Warnf("running query %s\n", s)
-			ctx := ctx.WithQuery(s)
-			_, iter, _, err := e.Query(ctx, s)
-			if err != nil {
-				return nil, err
-			}
-			_, err = sql.RowIterToRows(ctx, iter)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return e, nil
+	return enginetest.RunSetupScripts(ctx, e, setupData, supportsIndexes)
 }
 
 func (m *DuckHarness) SupportsNativeIndexCreation() bool {
@@ -248,7 +225,7 @@ func (m *DuckHarness) SupportsNativeIndexCreation() bool {
 }
 
 func (m *DuckHarness) SupportsForeignKeys() bool {
-	return false
+	return true
 }
 
 func (m *DuckHarness) SupportsKeylessTables() bool {

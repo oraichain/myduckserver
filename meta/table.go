@@ -3,6 +3,7 @@ package meta
 import (
 	stdsql "database/sql"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -18,6 +19,8 @@ type Table struct {
 var _ sql.Table = (*Table)(nil)
 var _ sql.PrimaryKeyTable = (*Table)(nil)
 var _ sql.AlterableTable = (*Table)(nil)
+var _ sql.IndexAlterableTable = (*Table)(nil)
+var _ sql.IndexAddressableTable = (*Table)(nil)
 var _ sql.InsertableTable = (*Table)(nil)
 var _ sql.UpdatableTable = (*Table)(nil)
 var _ sql.DeletableTable = (*Table)(nil)
@@ -61,8 +64,8 @@ func (t *Table) Schema() sql.Schema {
 
 func (t *Table) schema() sql.Schema {
 	rows, err := t.db.storage.Query(`
-		SELECT column_name, data_type, is_nullable, column_default, numeric_precision, numeric_scale FROM duckdb_columns() WHERE schema_name = ? AND table_name = ?
-	`, t.db.name, t.name)
+		SELECT column_name, data_type, is_nullable, column_default, numeric_precision, numeric_scale FROM duckdb_columns() WHERE database_name = ? AND schema_name = ? AND table_name = ?
+	`, t.db.catalogName, t.db.name, t.name)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
@@ -126,8 +129,8 @@ func (t *Table) PrimaryKeySchema() sql.PrimaryKeySchema {
 
 func (t *Table) primaryKeyOrdinals() []int {
 	rows, err := t.db.storage.Query(`
-		SELECT constraint_column_indexes FROM duckdb_constraints() WHERE schema_name = ? AND table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1
-	`, t.db.name, t.name)
+		SELECT constraint_column_indexes FROM duckdb_constraints() WHERE database_name = ? AND schema_name = ? AND table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1
+	`, t.db.catalogName, t.db.name, t.name)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
@@ -157,7 +160,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 		return err
 	}
 
-	sql := fmt.Sprintf(`ALTER TABLE "%s"."%s" ADD COLUMN "%s" %s`, t.db.name, t.name, column.Name, typ)
+	sql := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "%s" %s`, FullTableName(t.db.catalogName, t.db.name, t.name), column.Name, typ)
 
 	if !column.Nullable {
 		sql += " NOT NULL"
@@ -180,7 +183,7 @@ func (t *Table) DropColumn(ctx *sql.Context, columnName string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	sql := fmt.Sprintf(`ALTER TABLE "%s"."%s" DROP COLUMN "%s"`, t.db.name, t.name, columnName)
+	sql := fmt.Sprintf(`ALTER TABLE %s DROP COLUMN "%s"`, FullTableName(t.db.catalogName, t.db.name, t.name), columnName)
 
 	_, err := t.db.storage.Exec(sql)
 	if err != nil {
@@ -195,7 +198,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	sql := fmt.Sprintf(`ALTER TABLE "%s"."%s" ALTER COLUMN "%s"`, t.db.name, t.name, columnName)
+	sql := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN "%s"`, FullTableName(t.db.catalogName, t.db.name, t.name), columnName)
 
 	typ, err := duckdbDataType(column.Type)
 	if err != nil {
@@ -237,5 +240,128 @@ func (t *Table) Inserter(*sql.Context) sql.RowInserter {
 
 // Deleter implements sql.DeletableTable.
 func (t *Table) Deleter(*sql.Context) sql.RowDeleter {
+	panic("unimplemented")
+}
+
+// CreateIndex implements sql.IndexAlterableTable.
+func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
+	// Lock the table to ensure thread-safety during index creation
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if indexDef.IsPrimary() {
+		return fmt.Errorf("primary key cannot be created with CreateIndex, use ALTER TABLE ... ADD PRIMARY KEY instead")
+	}
+
+	if indexDef.IsSpatial() {
+		return fmt.Errorf("spatial indexes are not supported")
+	}
+
+	if indexDef.IsFullText() {
+		return fmt.Errorf("full text indexes are not supported")
+	}
+
+	// Prepare the column names for the index
+	columns := make([]string, len(indexDef.Columns))
+	for i, col := range indexDef.Columns {
+		columns[i] = fmt.Sprintf(`"%s"`, col.Name)
+	}
+
+	unique := ""
+	if indexDef.IsUnique() {
+		unique = "UNIQUE"
+	}
+
+	// Construct the SQL statement for creating the index
+	// DuckDB has very strange behavior that can't use full index name, so we have to switch context to the schema by USE statement
+	sql := fmt.Sprintf(`USE %s; CREATE %s INDEX "%s" ON %s (%s)`,
+		FullSchemaName(t.db.catalogName, t.db.name),
+		unique,
+		indexDef.Name,
+		FullTableName(t.db.catalogName, t.db.name, t.name),
+		strings.Join(columns, ", "))
+
+	// Add the index comment if provided
+	if indexDef.Comment != "" {
+		sql += fmt.Sprintf("; COMMENT ON INDEX %s IS '%s'",
+			FullIndexName(t.db.catalogName, t.db.name, indexDef.Name),
+			strings.ReplaceAll(indexDef.Comment, "'", "''"))
+	}
+
+	// Execute the SQL statement to create the index
+	_, err := t.db.storage.Exec(sql)
+	if err != nil {
+		return ErrDuckDB.New(err)
+	}
+
+	return nil
+}
+
+// DropIndex implements sql.IndexAlterableTable.
+func (t *Table) DropIndex(ctx *sql.Context, indexName string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Construct the SQL statement for dropping the index
+	// DuckDB requires switching context to the schema by USE statement
+	sql := fmt.Sprintf(`USE %s; DROP INDEX "%s"`,
+		FullSchemaName(t.db.catalogName, t.db.name),
+		indexName)
+
+	// Execute the SQL statement to drop the index
+	_, err := t.db.storage.Exec(sql)
+	if err != nil {
+		return ErrDuckDB.New(err)
+	}
+
+	return nil
+}
+
+// RenameIndex implements sql.IndexAlterableTable.
+func (t *Table) RenameIndex(ctx *sql.Context, fromIndexName string, toIndexName string) error {
+	return sql.ErrUnsupportedFeature.New("RenameIndex is not supported")
+}
+
+// GetIndexes implements sql.IndexAddressableTable.
+// This is only used for show index in SHOW INDEX and SHOW CREATE TABLE.
+func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	// Query to get the indexes for the table
+	rows, err := t.db.storage.Query(`SELECT index_name, is_unique, comment FROM duckdb_indexes() WHERE database_name = ? AND schema_name = ? AND table_name = ?`,
+		t.db.catalogName, t.db.name, t.name)
+	if err != nil {
+		return nil, ErrDuckDB.New(err)
+	}
+	defer rows.Close()
+
+	indexes := []sql.Index{}
+	for rows.Next() {
+		var indexName string
+		var comment stdsql.NullString
+		var isUnique bool
+
+		if err := rows.Scan(&indexName, &isUnique, &comment); err != nil {
+			return nil, ErrDuckDB.New(err)
+		}
+
+		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, comment.String))
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, ErrDuckDB.New(err)
+	}
+
+	return indexes, nil
+}
+
+// IndexedAccess implements sql.IndexAddressableTable.
+func (t *Table) IndexedAccess(lookup sql.IndexLookup) sql.IndexedTable {
+	panic("unimplemented")
+}
+
+// PreciseMatch implements sql.IndexAddressableTable.
+func (t *Table) PreciseMatch() bool {
 	panic("unimplemented")
 }

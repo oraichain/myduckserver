@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/apecloud/myduckserver/meta"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -63,7 +64,7 @@ func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string)
 			logrus.WithError(err).Error("Failed to get current schema")
 			return nil, err
 		} else if currentSchema != schemaName {
-			if _, err := conn.ExecContext(ctx, "USE "+b.catalogName+"."+schemaName); err != nil {
+			if _, err := conn.ExecContext(ctx, "USE "+meta.FullSchemaName(b.catalogName, schemaName)); err != nil {
 				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
 				return nil, err
 			}
@@ -100,6 +101,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	switch n.(type) {
 	case *plan.CreateDB, *plan.DropDB, *plan.DropTable, *plan.RenameTable,
 		*plan.CreateTable, *plan.AddColumn, *plan.RenameColumn, *plan.DropColumn, *plan.ModifyColumn,
+		*plan.CreateIndex, *plan.DropIndex, *plan.AlterIndex, *plan.ShowIndexes,
 		*plan.ShowTables, *plan.ShowCreateTable,
 		*plan.ShowBinlogs, *plan.ShowBinlogStatus, *plan.ShowWarnings:
 		return b.base.Build(ctx, root, r)
@@ -128,7 +130,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 	switch node := n.(type) {
 	case *plan.Use:
-		useStmt := "USE " + fullSchemaName(b.catalogName, node.Database().Name())
+		useStmt := "USE " + meta.FullSchemaName(b.catalogName, node.Database().Name())
 		if _, err := conn.ExecContext(ctx.Context, useStmt); err != nil {
 			return nil, err
 		}
@@ -244,14 +246,4 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn
 		RowsAffected: uint64(affected),
 		InsertID:     uint64(insertId),
 	})), nil
-}
-
-func fullSchemaName(db, schema string) string {
-	if db == "" {
-		return schema
-	}
-	if schema == "" {
-		return db
-	}
-	return db + "." + schema
 }

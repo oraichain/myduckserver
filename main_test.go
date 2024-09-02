@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"testing"
@@ -53,6 +54,42 @@ var indexBehaviors = []*indexBehaviorTestParams{
 var parallelVals = []int{
 	1,
 	2,
+}
+
+func TestDebugHarness(t *testing.T) {
+	// t.Skip("only used for debugging")
+
+	harness := NewDuckHarness("debug", 1, 1, true, nil)
+
+	setupData := []setup.SetupScript{{
+		`create database if not exists mydb`,
+		`use mydb`,
+		`create table t0 (id int primary key, val int)`,
+		`insert into t0 values (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)`,
+		`create index t0_val on t0(val)`,
+	}}
+
+	harness.Setup(setupData)
+	engine, err := harness.NewEngine(t)
+	require.NoError(t, err)
+
+	engine.EngineAnalyzer().Debug = true
+	engine.EngineAnalyzer().Verbose = true
+
+	ctx := enginetest.NewContext(harness)
+	_, iter, _, err := engine.Query(ctx, "SHOW CREATE TABLE t0")
+	require.NoError(t, err)
+	defer iter.Close(ctx)
+
+	for {
+		row, err := iter.Next(ctx)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		fmt.Println(row)
+	}
+
 }
 
 // TestQueries tests the given queries on an engine under a variety of circumstances:

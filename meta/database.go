@@ -10,9 +10,10 @@ import (
 )
 
 type Database struct {
-	mu      *sync.RWMutex
-	name    string
-	storage *stdsql.DB
+	mu          *sync.RWMutex
+	name        string
+	storage     *stdsql.DB
+	catalogName string
 }
 
 var _ sql.Database = (*Database)(nil)
@@ -23,11 +24,13 @@ var _ sql.ViewDatabase = (*Database)(nil)
 var _ sql.TriggerDatabase = (*Database)(nil)
 var _ sql.CollatedDatabase = (*Database)(nil)
 
-func NewDatabase(name string, storage *stdsql.DB) *Database {
+func NewDatabase(name string, storage *stdsql.DB, catalogName string) *Database {
 	return &Database{
-		mu:      &sync.RWMutex{},
-		name:    name,
-		storage: storage}
+		mu:          &sync.RWMutex{},
+		name:        name,
+		storage:     storage,
+		catalogName: catalogName,
+	}
 }
 
 // GetTableNames implements sql.Database.
@@ -62,7 +65,7 @@ func (d *Database) GetTableInsensitive(ctx *sql.Context, tblName string) (sql.Ta
 }
 
 func (d *Database) tablesInsensitive() (map[string]sql.Table, error) {
-	rows, err := d.storage.Query("SELECT DISTINCT table_name FROM duckdb_tables() where schema_name = ?", d.name)
+	rows, err := d.storage.Query("SELECT DISTINCT table_name FROM duckdb_tables() where database_name = ? and schema_name = ?", d.catalogName, d.name)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
 	}
@@ -109,7 +112,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		columns = append(columns, colDef)
 	}
 
-	createTableSQL := fmt.Sprintf(`CREATE TABLE "%s"."%s" (%s`, d.name, name, strings.Join(columns, ", "))
+	createTableSQL := fmt.Sprintf(`CREATE TABLE %s (%s`, FullTableName(d.catalogName, d.name, name), strings.Join(columns, ", "))
 
 	var primaryKeys []string
 	for pkord := range schema.PkOrdinals {
@@ -136,7 +139,7 @@ func (d *Database) DropTable(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`DROP TABLE "%s"."%s"`, d.name, name))
+	_, err := d.storage.Exec(fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalogName, d.name, name)))
 
 	if err != nil {
 		return ErrDuckDB.New(err)
@@ -149,7 +152,7 @@ func (d *Database) RenameTable(ctx *sql.Context, oldName string, newName string)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`ALTER TABLE "%s"."%s" RENAME TO "%s"`, d.name, oldName, newName))
+	_, err := d.storage.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO "%s"`, FullTableName(d.catalogName, d.name, oldName), newName))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -223,7 +226,7 @@ func (d *Database) CreateView(ctx *sql.Context, name string, selectStatement str
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`USE "%s"; CREATE VIEW "%s" AS %s`, d.name, name, selectStatement))
+	_, err := d.storage.Exec(fmt.Sprintf(`USE %s; CREATE VIEW "%s" AS %s`, FullSchemaName(d.catalogName, d.name), name, selectStatement))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -235,7 +238,7 @@ func (d *Database) DropView(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`USE "%s"; DROP VIEW "%s"`, d.name, name))
+	_, err := d.storage.Exec(fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalogName, d.name), name))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}

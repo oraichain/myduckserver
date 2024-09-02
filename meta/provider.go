@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -84,7 +85,7 @@ func (prov *DbProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 			continue
 		}
 
-		all = append(all, NewDatabase(schemaName, prov.storage))
+		all = append(all, NewDatabase(schemaName, prov.storage, prov.catalogName))
 	}
 
 	sort.Slice(all, func(i, j int) bool {
@@ -105,7 +106,7 @@ func (prov *DbProvider) Database(ctx *sql.Context, name string) (sql.Database, e
 	}
 
 	if ok {
-		return NewDatabase(name, prov.storage), nil
+		return NewDatabase(name, prov.storage, prov.catalogName), nil
 	}
 	return nil, sql.ErrDatabaseNotFound.New(name)
 }
@@ -137,7 +138,7 @@ func (prov *DbProvider) CreateDatabase(ctx *sql.Context, name string) error {
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := prov.storage.Exec(`CREATE SCHEMA "` + name + `"`)
+	_, err := prov.storage.Exec(fmt.Sprintf(`CREATE SCHEMA %s`, FullSchemaName(prov.catalogName, name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -150,7 +151,7 @@ func (prov *DbProvider) DropDatabase(ctx *sql.Context, name string) error {
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := prov.storage.Exec(`DROP SCHEMA "` + name + `" CASCADE`)
+	_, err := prov.storage.Exec(fmt.Sprintf(`DROP SCHEMA %s CASCADE`, FullSchemaName(prov.catalogName, name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
