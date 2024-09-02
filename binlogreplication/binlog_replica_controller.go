@@ -149,7 +149,7 @@ func (d *myBinlogReplicaController) StartReplica(ctx *sql.Context) error {
 
 	// Attempt to record that the replica has started replication so that it will
 	// start automatically the next time the replica server is started.
-	if err := persistReplicaRunningState(ctx, running); err != nil {
+	if err := persistReplicaRunningState(ctx, d.engine, running); err != nil {
 		ctx.GetLogger().Errorf("unable to persist replica running state: %s", err.Error())
 	}
 
@@ -222,7 +222,7 @@ func (d *myBinlogReplicaController) StopReplica(ctx *sql.Context) error {
 
 	// Attempt to record that the replica has stopped replication so that it will not
 	// start automatically the next time the replica server is started.
-	if err := persistReplicaRunningState(ctx, notRunning); err != nil {
+	if err := persistReplicaRunningState(ctx, d.engine, notRunning); err != nil {
 		ctx.GetLogger().Errorf("unable to persist replica running state: %s", err.Error())
 	}
 
@@ -441,7 +441,7 @@ func (d *myBinlogReplicaController) setSqlError(errno uint, message string) {
 // shutdown, then this method will not start replication. This method should only be called during
 // the server startup process and should not be invoked after that.
 func (d *myBinlogReplicaController) AutoStart(_ context.Context) error {
-	runningState, err := loadReplicationRunningState(d.ctx)
+	runningState, err := loadReplicationRunningState(d.ctx, d.engine)
 	if err != nil {
 		logrus.Errorf("Unable to load replication running state: %s", err.Error())
 		return err

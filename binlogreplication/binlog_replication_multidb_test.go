@@ -24,7 +24,7 @@ import (
 // applied by a replica.
 func TestBinlogReplicationMultiDb(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Make changes on the primary to db01 and db02
@@ -60,30 +60,6 @@ func TestBinlogReplicationMultiDb(t *testing.T) {
 	require.NoError(t, rows.Close())
 	require.NoError(t, rows.Close())
 
-	// Verify db01.dolt_diff
-	replicaDatabase.MustExec("use db01;")
-	rows, err = replicaDatabase.Queryx("select * from db01.dolt_diff;")
-	require.NoError(t, err)
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "1", row["data_change"])
-	require.EqualValues(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "1", row["data_change"])
-	require.EqualValues(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "1", row["data_change"])
-	require.EqualValues(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "0", row["data_change"])
-	require.EqualValues(t, "1", row["schema_change"])
-	require.False(t, rows.Next())
-	require.NoError(t, rows.Close())
-	require.NoError(t, rows.Close())
-
 	// Verify the changes in db02 on the replica
 	replicaDatabase.MustExec("use db02;")
 	rows, err = replicaDatabase.Queryx("select * from db02.t02 order by pk asc;")
@@ -98,35 +74,13 @@ func TestBinlogReplicationMultiDb(t *testing.T) {
 	require.Equal(t, "8", row["pk"])
 	require.False(t, rows.Next())
 	require.NoError(t, rows.Close())
-
-	// Verify db02.dolt_diff
-	rows, err = replicaDatabase.Queryx("select * from db02.dolt_diff;")
-	require.NoError(t, err)
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "1", row["data_change"])
-	require.Equal(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "1", row["data_change"])
-	require.Equal(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "1", row["data_change"])
-	require.Equal(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "0", row["data_change"])
-	require.Equal(t, "1", row["schema_change"])
-	require.False(t, rows.Next())
-	require.NoError(t, rows.Close())
 }
 
 // TestBinlogReplicationMultiDbTransactions tests that binlog events for transactions that span
 // multiple DBs are applied correctly to a replica.
 func TestBinlogReplicationMultiDbTransactions(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Make changes on the primary to db01 and db02
@@ -159,21 +113,6 @@ func TestBinlogReplicationMultiDbTransactions(t *testing.T) {
 	require.False(t, rows.Next())
 	require.NoError(t, rows.Close())
 
-	// Verify db01.dolt_diff
-	replicaDatabase.MustExec("use db01;")
-	rows, err = replicaDatabase.Queryx("select * from db01.dolt_diff;")
-	require.NoError(t, err)
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "1", row["data_change"])
-	require.EqualValues(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t01", row["table_name"])
-	require.EqualValues(t, "0", row["data_change"])
-	require.EqualValues(t, "1", row["schema_change"])
-	require.False(t, rows.Next())
-	require.NoError(t, rows.Close())
-
 	// Verify the changes in db02 on the replica
 	waitForReplicaToCatchUp(t)
 	replicaDatabase.MustExec("use db02;")
@@ -187,20 +126,6 @@ func TestBinlogReplicationMultiDbTransactions(t *testing.T) {
 	require.Equal(t, "6", row["pk"])
 	row = convertMapScanResultToStrings(readNextRow(t, rows))
 	require.Equal(t, "8", row["pk"])
-	require.False(t, rows.Next())
-	require.NoError(t, rows.Close())
-
-	// Verify db02.dolt_diff
-	rows, err = replicaDatabase.Queryx("select * from db02.dolt_diff;")
-	require.NoError(t, err)
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "1", row["data_change"])
-	require.Equal(t, "0", row["schema_change"])
-	row = convertMapScanResultToStrings(readNextRow(t, rows))
-	require.Equal(t, "t02", row["table_name"])
-	require.Equal(t, "0", row["data_change"])
-	require.Equal(t, "1", row["schema_change"])
 	require.False(t, rows.Next())
 	require.NoError(t, rows.Close())
 }

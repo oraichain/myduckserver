@@ -553,7 +553,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			ctx.GetLogger().Errorf("unable to set @@GLOBAL.gtid_executed: %s", err.Error())
 		}
-		err = positionStore.Save(ctx, a.currentPosition)
+		err = positionStore.Save(ctx, engine, a.currentPosition)
 		if err != nil {
 			return fmt.Errorf("unable to store GTID executed metadata to disk: %s", err.Error())
 		}

@@ -17,6 +17,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"path/filepath"
 
 	"github.com/apecloud/myduckserver/meta"
 	sqle "github.com/dolthub/go-mysql-server"
@@ -34,9 +35,11 @@ import (
 // The included MySQL client is used in this example, however any MySQL-compatible client will work.
 
 var (
-	address = "localhost"
-	port    = 3306
-	dbFile  = "mysql.db"
+	address       = "localhost"
+	port          = 3306
+	dataDirectory = "."
+	dbFileName    = "mysql.db"
+	dbFilePath    string
 )
 
 func checkDependencies() {
@@ -49,13 +52,16 @@ func checkDependencies() {
 func init() {
 	flag.StringVar(&address, "address", address, "The address to bind to.")
 	flag.IntVar(&port, "port", port, "The port to bind to.")
+	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
 }
 
 func main() {
 	flag.Parse()
+	dbFilePath = filepath.Join(dataDirectory, dbFileName)
+
 	checkDependencies()
 
-	provider, err := meta.NewDBProvider(dbFile)
+	provider, err := meta.NewDBProvider(dataDirectory, dbFileName)
 	if err != nil {
 		logrus.Fatalln("Failed to open the database:", err)
 	}

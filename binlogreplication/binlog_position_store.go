@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
 )
@@ -93,7 +94,7 @@ func (store *binlogPositionStore) Load() (*mysql.Position, error) {
 // represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
 // default binlog channel ("") is supported. If any errors are encountered persisting the position to disk, an
 // error is returned.
-func (store *binlogPositionStore) Save(ctx *sql.Context, position *mysql.Position) error {
+func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, position *mysql.Position) error {
 	if position == nil {
 		return fmt.Errorf("unable to save binlog position: nil position passed")
 	}
@@ -102,11 +103,12 @@ func (store *binlogPositionStore) Save(ctx *sql.Context, position *mysql.Positio
 	defer store.mu.Unlock()
 
 	// The .replica dir may not exist yet, so create it if necessary.
-	if err := createReplicaDir(); err != nil {
+	dir, err := createReplicaDir(engine)
+	if err != nil {
 		return err
 	}
 
-	filePath, err := filepath.Abs(filepath.Join(binlogPositionDirectory, binlogPositionFilename))
+	filePath, err := filepath.Abs(filepath.Join(dir, binlogPositionFilename))
 	if err != nil {
 		return err
 	}
@@ -126,18 +128,19 @@ func (store *binlogPositionStore) Delete(ctx *sql.Context) error {
 }
 
 // createReplicaDir creates the .replica directory if it doesn't already exist.
-func createReplicaDir() error {
-	stat, err := os.Stat(binlogPositionDirectory)
+func createReplicaDir(engine *gms.Engine) (string, error) {
+	dir := filepath.Join(getDataDir(engine), binlogPositionDirectory)
+	stat, err := os.Stat(dir)
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		err := os.MkdirAll(binlogPositionDirectory, os.ModePerm)
+		err := os.MkdirAll(dir, os.ModePerm)
 		if err != nil {
-			return fmt.Errorf("unable to save binlog metadata: %s", err)
+			return "", fmt.Errorf("unable to save binlog metadata: %s", err)
 		}
 	} else if err != nil {
-		return err
+		return "", err
 	} else if !stat.IsDir() {
-		return fmt.Errorf("unable to save binlog metadata: %s exists as a file, not a dir", binlogPositionDirectory)
+		return "", fmt.Errorf("unable to save binlog metadata: %s exists as a file, not a dir", binlogPositionDirectory)
 	}
 
-	return nil
+	return dir, nil
 }

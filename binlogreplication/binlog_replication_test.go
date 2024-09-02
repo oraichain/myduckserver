@@ -41,17 +41,21 @@ import (
 )
 
 var mySqlContainer string
-var mySqlPort, doltPort int
+var mySqlPort, duckPort int
 var primaryDatabase, replicaDatabase *sqlx.DB
-var doltProcess *os.Process
-var doltLogFilePath, oldDoltLogFilePath string
-var doltLogFile, mysqlLogFile *os.File
+var duckProcess *os.Process
+var duckLogFilePath, oldDuckLogFilePath string
+var duckLogFile, mysqlLogFile *os.File
 var testDir string
 var originalWorkingDir string
 
-// doltReplicaSystemVars are the common system variables that need
+const (
+	duckSubdir = "duck"
+)
+
+// duckReplicaSystemVars are the common system variables that need
 // to be set on a Dolt replica before replication is turned on.
-var doltReplicaSystemVars = map[string]string{
+var duckReplicaSystemVars = map[string]string{
 	"server_id": "42",
 }
 
@@ -67,25 +71,25 @@ func teardown(t *testing.T) {
 		}
 		stopMySqlServer(t)
 	}
-	if doltProcess != nil {
-		stopDoltSqlServer(t)
+	if duckProcess != nil {
+		stopDuckSqlServer(t)
 	}
 	if mysqlLogFile != nil {
 		mysqlLogFile.Close()
 	}
-	if doltLogFile != nil {
-		doltLogFile.Close()
+	if duckLogFile != nil {
+		duckLogFile.Close()
 	}
 
 	// Output server logs on failure for easier debugging
 	if t.Failed() {
-		if oldDoltLogFilePath != "" {
-			fmt.Printf("\nDolt server log from %s:\n", oldDoltLogFilePath)
-			printFile(oldDoltLogFilePath)
+		if oldDuckLogFilePath != "" {
+			fmt.Printf("\nDolt server log from %s:\n", oldDuckLogFilePath)
+			printFile(oldDuckLogFilePath)
 		}
 
-		fmt.Printf("\nDolt server log from %s:\n", doltLogFilePath)
-		printFile(doltLogFilePath)
+		fmt.Printf("\nDolt server log from %s:\n", duckLogFilePath)
+		printFile(duckLogFilePath)
 	} else {
 		// clean up temp files on clean test runs
 		defer os.RemoveAll(testDir)
@@ -104,7 +108,7 @@ func teardown(t *testing.T) {
 // Dolt replica, along with simple insert, update, and delete statements.
 func TestBinlogReplicationSanityCheck(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Create a table on the primary and verify on the replica
@@ -130,7 +134,7 @@ func TestBinlogReplicationSanityCheck(t *testing.T) {
 // replication was running when the replica was shut down.
 func TestAutoRestartReplica(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 
 	// Assert that replication is not running yet
 	status := queryReplicaStatus(t)
@@ -150,12 +154,12 @@ func TestAutoRestartReplica(t *testing.T) {
 	requireReplicaResults(t, "select * from db01.autoRestartTest;", [][]any{{"100"}})
 
 	// Test for the presence of the replica-running state file
-	require.True(t, fileExists(filepath.Join(testDir, "dolt", ".doltcfg", "replica-running")))
+	require.True(t, fileExists(filepath.Join(testDir, duckSubdir, ".replica", "replica-running")))
 
 	// Restart the Dolt replica
-	stopDoltSqlServer(t)
+	stopDuckSqlServer(t)
 	var err error
-	doltPort, doltProcess, err = startDoltSqlServer(testDir, nil)
+	duckPort, duckProcess, err = startDuckSqlServer(testDir, nil)
 	require.NoError(t, err)
 
 	// Assert that some test data replicates correctly
@@ -175,11 +179,11 @@ func TestAutoRestartReplica(t *testing.T) {
 
 	// Stop replication and assert the replica-running marker file is removed
 	replicaDatabase.MustExec("stop replica")
-	require.False(t, fileExists(filepath.Join(testDir, "dolt", ".doltcfg", "replica-running")))
+	require.False(t, fileExists(filepath.Join(testDir, duckSubdir, ".replica", "replica-running")))
 
 	// Restart the Dolt replica
-	stopDoltSqlServer(t)
-	doltPort, doltProcess, err = startDoltSqlServer(testDir, nil)
+	stopDuckSqlServer(t)
+	duckPort, duckProcess, err = startDuckSqlServer(testDir, nil)
 	require.NoError(t, err)
 
 	// SHOW REPLICA STATUS should show that replication is NOT running, with no errors
@@ -197,7 +201,7 @@ func TestBinlogSystemUserIsLocked(t *testing.T) {
 	defer teardown(t)
 	startSqlServers(t)
 
-	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%v)/", binlogApplierUser, doltPort)
+	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%v)/", binlogApplierUser, duckPort)
 	db, err := sqlx.Open("mysql", dsn)
 	require.NoError(t, err)
 
@@ -218,7 +222,7 @@ func TestBinlogSystemUserIsLocked(t *testing.T) {
 // process the events without errors.
 func TestFlushLogs(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Make changes on the primary and verify on the replica
@@ -242,7 +246,7 @@ func TestFlushLogs(t *testing.T) {
 // replication configuration and metadata.
 func TestResetReplica(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// RESET REPLICA returns an error if replication is running
@@ -294,7 +298,7 @@ func TestResetReplica(t *testing.T) {
 // for various error conditions.
 func TestStartReplicaErrors(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 
 	// START REPLICA returns an error when no replication source is configured
 	_, err := replicaDatabase.Queryx("START REPLICA;")
@@ -337,7 +341,7 @@ func TestShowReplicaStatus(t *testing.T) {
 // warnings are logged when STOP REPLICA is invoked when replication is not running.
 func TestStopReplica(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 
 	// STOP REPLICA logs a warning if replication is not running
 	replicaDatabase.MustExec("STOP REPLICA;")
@@ -381,7 +385,7 @@ func TestForeignKeyChecks(t *testing.T) {
 	t.SkipNow()
 
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Test that we can execute statement-based replication that requires foreign_key_checks
@@ -440,7 +444,7 @@ func TestCharsetsAndCollations(t *testing.T) {
 	t.SkipNow()
 
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	// Use non-default charset/collations to create data on the primary
@@ -597,14 +601,14 @@ func readAllRowsIntoSlices(t *testing.T, rows *sqlx.Rows) [][]any {
 
 // startSqlServers starts a MySQL server and a Dolt sql-server for use in tests.
 func startSqlServers(t *testing.T) {
-	startSqlServersWithDoltSystemVars(t, nil)
+	startSqlServersWithSystemVars(t, nil)
 }
 
-// startSqlServersWithDoltSystemVars starts a MySQL server and a Dolt sql-server for use in tests. Before the
-// Dolt sql-server is started, the specified |doltPersistentSystemVars| are persisted in the Dolt sql-server's
+// startSqlServersWithSystemVars starts a MySQL server and a my-sql-server for use in tests. Before the
+// my-sql-server is started, the specified |persistentSystemVars| are persisted in the  my-sql-server's
 // local configuration. These are useful when you need to set system variables that must be available when the
 // sql-server starts up, such as replication system variables.
-func startSqlServersWithDoltSystemVars(t *testing.T, doltPersistentSystemVars map[string]string) {
+func startSqlServersWithSystemVars(t *testing.T, persistentSystemVars map[string]string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Skipping binlog replication integ tests on Windows OS")
 	} else if runtime.GOOS == "darwin" && os.Getenv("CI") == "true" {
@@ -626,14 +630,14 @@ func startSqlServersWithDoltSystemVars(t *testing.T, doltPersistentSystemVars ma
 	// Start up primary and replica databases
 	mySqlPort, mySqlContainer, err = startMySqlServer(testDir)
 	require.NoError(t, err)
-	doltPort, doltProcess, err = startDoltSqlServer(testDir, doltPersistentSystemVars)
+	duckPort, duckProcess, err = startDuckSqlServer(testDir, persistentSystemVars)
 	require.NoError(t, err)
 }
 
 // stopMySqlServer stops the running MySQL server. If any errors are encountered while stopping
 // the MySQL server, this function will fail the current test.
 func stopMySqlServer(t *testing.T) error {
-	cmd := exec.Command("docker", "rm", "-f", mySqlContainer)
+	cmd := exec.Command("docker", "kill", mySqlContainer)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("unable to stop MySQL container: %v - %s", err, output)
@@ -641,34 +645,19 @@ func stopMySqlServer(t *testing.T) error {
 	return nil
 }
 
-// stopDoltSqlServer stops the running Dolt sql-server. If any errors are encountered while
+// stopDuckSqlServer stops the running Dolt sql-server. If any errors are encountered while
 // stopping the Dolt sql-server, this function will fail the current test.
-func stopDoltSqlServer(t *testing.T) {
+func stopDuckSqlServer(t *testing.T) {
 	// Use the negative process ID so that we grab the entire process group.
 	// This is necessary to kill all the processes the child spawns.
 	// Note that we use os.FindProcess, instead of syscall.Kill, since syscall.Kill
 	// is not available on windows.
-	p, err := os.FindProcess(-doltProcess.Pid)
+	p, err := os.FindProcess(-duckProcess.Pid)
 	require.NoError(t, err)
 
 	err = p.Signal(syscall.SIGKILL)
 	require.NoError(t, err)
 	time.Sleep(250 * time.Millisecond)
-
-	// Remove the sql-server lock file so that we can restart cleanly
-	lockFilepath := filepath.Join(testDir, "dolt", "db01", ".dolt", "sql-server.lock")
-	stat, _ := os.Stat(lockFilepath)
-	if stat != nil {
-		err = os.Remove(lockFilepath)
-		require.NoError(t, err)
-	}
-	// Remove the global sql-server lock file as well
-	lockFilepath = filepath.Join(testDir, "dolt", ".dolt", "sql-server.lock")
-	stat, _ = os.Stat(lockFilepath)
-	if stat != nil {
-		err = os.Remove(lockFilepath)
-		require.NoError(t, err)
-	}
 }
 
 // startReplication configures the replication source on the replica and runs the START REPLICA statement.
@@ -802,11 +791,11 @@ func directoryExists(path string) bool {
 	return info.IsDir()
 }
 
-var cachedDoltDevBuildPath = ""
+var cachedDevBuildPath = ""
 
-func initializeDevDoltBuild(dir string, goDirPath string) string {
-	if cachedDoltDevBuildPath != "" {
-		return cachedDoltDevBuildPath
+func initializeDevBuild(dir string, goDirPath string) string {
+	if cachedDevBuildPath != "" {
+		return cachedDevBuildPath
 	}
 
 	// If we're not in a CI environment, don't worry about building a dev build
@@ -815,14 +804,14 @@ func initializeDevDoltBuild(dir string, goDirPath string) string {
 	}
 
 	basedir := filepath.Dir(filepath.Dir(dir))
-	fullpath := filepath.Join(basedir, fmt.Sprintf("devDolt-%d", os.Getpid()))
+	fullpath := filepath.Join(basedir, fmt.Sprintf("dev-build-%d", os.Getpid()))
 
 	_, err := os.Stat(fullpath)
 	if err == nil {
 		return fullpath
 	}
 
-	fmt.Printf("building dolt dev build at: %s \n", fullpath)
+	fmt.Printf("building dev build at: %s \n", fullpath)
 	cmd := exec.Command("go", "build", "-o", fullpath)
 	cmd.Dir = goDirPath
 
@@ -830,16 +819,16 @@ func initializeDevDoltBuild(dir string, goDirPath string) string {
 	if err != nil {
 		panic("unable to build dolt for binlog integration tests: " + err.Error() + "\nFull output: " + string(output) + "\n")
 	}
-	cachedDoltDevBuildPath = fullpath
+	cachedDevBuildPath = fullpath
 
-	return cachedDoltDevBuildPath
+	return cachedDevBuildPath
 }
 
-// startDoltSqlServer starts a Dolt sql-server on a free port from the specified directory |dir|. If
-// |doltPeristentSystemVars| is populated, then those system variables will be set, persistently, for
-// the Dolt database, before the Dolt sql-server is started.
-func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) (int, *os.Process, error) {
-	dir = filepath.Join(dir, "dolt")
+// startDuckSqlServer starts a sql-server on a free port from the specified directory |dir|. If
+// |peristentSystemVars| is populated, then those system variables will be set, persistently, for
+// the database, before the sql-server is started.
+func startDuckSqlServer(dir string, persistentSystemVars map[string]string) (int, *os.Process, error) {
+	dir = filepath.Join(dir, duckSubdir)
 	err := os.MkdirAll(dir, 0777)
 	if err != nil {
 		return -1, nil, err
@@ -847,10 +836,10 @@ func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) 
 
 	// If we already assigned a port, re-use it. This is useful when testing restarting a primary, since
 	// we want the primary to come back up on the same port, so the replica can reconnect.
-	if doltPort < 1 {
-		doltPort = findFreePort()
+	if duckPort < 1 {
+		duckPort = findFreePort()
 	}
-	fmt.Printf("Starting Dolt sql-server on port: %d, with data dir %s\n", doltPort, dir)
+	fmt.Printf("Starting Dolt sql-server on port: %d, with data dir %s\n", duckPort, dir)
 
 	// take the CWD and move up four directories to find the go directory
 	if originalWorkingDir == "" {
@@ -868,13 +857,14 @@ func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) 
 
 	args := []string{"go", "run", ".",
 		// "--loglevel=TRACE",
-		fmt.Sprintf("--port=%v", doltPort),
+		fmt.Sprintf("--port=%v", duckPort),
+		fmt.Sprintf("--datadir=%s", dir),
 	}
 
 	// If we're running in CI, use a precompiled dolt binary instead of go run
-	devDoltPath := initializeDevDoltBuild(dir, goDirPath)
-	if devDoltPath != "" {
-		args[2] = devDoltPath
+	devBuildPath := initializeDevBuild(dir, goDirPath)
+	if devBuildPath != "" {
+		args[2] = devBuildPath
 		args = args[2:]
 	}
 	cmd := exec.Command(args[0], args[1:]...)
@@ -892,18 +882,18 @@ func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) 
 
 	// Some tests restart the Dolt sql-server, so if we have a current log file, save a reference
 	// to it so we can print the results later if the test fails.
-	if doltLogFilePath != "" {
-		oldDoltLogFilePath = doltLogFilePath
+	if duckLogFilePath != "" {
+		oldDuckLogFilePath = duckLogFilePath
 	}
 
-	doltLogFilePath = filepath.Join(dir, fmt.Sprintf("dolt-%d.out.log", time.Now().Unix()))
-	doltLogFile, err = os.Create(doltLogFilePath)
+	duckLogFilePath = filepath.Join(dir, fmt.Sprintf("dolt-%d.out.log", time.Now().Unix()))
+	duckLogFile, err = os.Create(duckLogFilePath)
 	if err != nil {
 		return -1, nil, err
 	}
-	fmt.Printf("dolt sql-server logs at: %s \n", doltLogFilePath)
-	cmd.Stdout = doltLogFile
-	cmd.Stderr = doltLogFile
+	fmt.Printf("dolt sql-server logs at: %s \n", duckLogFilePath)
+	cmd.Stdout = duckLogFile
+	cmd.Stderr = duckLogFile
 	err = cmd.Start()
 	if err != nil {
 		return -1, nil, fmt.Errorf("unable to execute command %v: %v", cmd.String(), err.Error())
@@ -911,7 +901,7 @@ func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) 
 
 	fmt.Printf("Dolt CMD: %s\n", cmd.String())
 
-	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%v)/", "root", doltPort)
+	dsn := fmt.Sprintf("%s@tcp(127.0.0.1:%v)/", "root", duckPort)
 	replicaDatabase = sqlx.MustOpen("mysql", dsn)
 
 	err = waitForSqlServerToStart(replicaDatabase)
@@ -920,9 +910,9 @@ func startDoltSqlServer(dir string, doltPersistentSystemVars map[string]string) 
 	}
 
 	mustCreateReplicatorUser(replicaDatabase)
-	fmt.Printf("Dolt server started on port %v \n", doltPort)
+	fmt.Printf("Dolt server started on port %v \n", duckPort)
 
-	return doltPort, cmd.Process, nil
+	return duckPort, cmd.Process, nil
 }
 
 // mustCreateReplicatorUser creates the replicator user on the specified |db| and grants them replication slave privs.
@@ -969,15 +959,6 @@ func printFile(path string) {
 		fmt.Print(s)
 	}
 	fmt.Println()
-}
-
-// assertRepoStateFileExists asserts that the repo_state.json file is present for the specified
-// database |db|.
-func assertRepoStateFileExists(t *testing.T, db string) {
-	repoStateFile := filepath.Join(testDir, "dolt", db, ".dolt", "repo_state.json")
-
-	_, err := os.Stat(repoStateFile)
-	require.NoError(t, err)
 }
 
 // requireReplicaResults runs the specified |query| on the replica database and asserts that the results match

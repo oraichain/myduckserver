@@ -21,13 +21,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/apecloud/myduckserver/configuration"
+	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/mysql_db"
 )
 
 // replicationRunningStateDirectory is the directory where the "replica-running" file is stored to indicate that
 // replication on a replica was running the last time the server was running.
-const replicationRunningStateDirectory = ".replica"
+const replicationRunningStateDirectory = binlogPositionDirectory
 
 // replicaRunningFilename holds the name of the file that indicates replication was running on a replica server.
 const replicaRunningFilename = "replica-running"
@@ -49,11 +51,15 @@ func persistReplicationConfiguration(ctx *sql.Context, replicaSourceInfo *mysql_
 	return mysqlDb.Persist(ctx, ed)
 }
 
+func getDataDir(engine *gms.Engine) string {
+	return engine.Analyzer.Catalog.DbProvider.(configuration.DataDirProvider).DataDir()
+}
+
 // loadReplicationRunningState loads the replication running state from disk by looking for a "replica-running" file
 // in the .doltcfg directory. An error is returned if any problems were encountered loading the state from disk.
-func loadReplicationRunningState(ctx *sql.Context) (replicaRunningState, error) {
+func loadReplicationRunningState(ctx *sql.Context, engine *gms.Engine) (replicaRunningState, error) {
 	replicationRunningStateFilepath, err := filepath.Abs(
-		filepath.Join(replicationRunningStateDirectory, replicaRunningFilename))
+		filepath.Join(getDataDir(engine), replicationRunningStateDirectory, replicaRunningFilename))
 	if err != nil {
 		return notRunning, err
 	}
@@ -68,16 +74,15 @@ func loadReplicationRunningState(ctx *sql.Context) (replicaRunningState, error) 
 }
 
 // persistReplicaRunningState records the running |state| of a replica to disk by creating a "replica-running" empty
-// file in the .doltcfg directory. An error is returned if any problems were encountered saving the state to disk.
-func persistReplicaRunningState(ctx *sql.Context, state replicaRunningState) error {
-	// The .doltcfg dir may not exist yet, so create it if necessary.
-	err := createReplicaDir()
+// file in the .replica directory. An error is returned if any problems were encountered saving the state to disk.
+func persistReplicaRunningState(ctx *sql.Context, engine *gms.Engine, state replicaRunningState) error {
+	// The .replica dir may not exist yet, so create it if necessary.
+	dir, err := createReplicaDir(engine)
 	if err != nil {
 		return err
 	}
 
-	replicationRunningStateFilepath, err := filepath.Abs(
-		filepath.Join(replicationRunningStateDirectory, replicaRunningFilename))
+	replicationRunningStateFilepath, err := filepath.Abs(filepath.Join(dir, replicaRunningFilename))
 	if err != nil {
 		return err
 	}

@@ -26,7 +26,7 @@ import (
 // server process can be restarted and replica can be restarted without problems.
 func TestBinlogReplicationServerRestart(t *testing.T) {
 	defer teardown(t)
-	startSqlServersWithDoltSystemVars(t, doltReplicaSystemVars)
+	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
 
 	primaryDatabase.MustExec("create table t (pk int auto_increment primary key)")
@@ -45,11 +45,11 @@ func TestBinlogReplicationServerRestart(t *testing.T) {
 
 	// Let the replica process a few transactions, then stop the server and pause a second
 	waitForReplicaToReachGtid(t, 3)
-	stopDoltSqlServer(t)
+	stopDuckSqlServer(t)
 	time.Sleep(1000 * time.Millisecond)
 
 	var err error
-	doltPort, doltProcess, err = startDoltSqlServer(testDir, nil)
+	duckPort, duckProcess, err = startDuckSqlServer(testDir, nil)
 	require.NoError(t, err)
 
 	// Check replication status on the replica and assert configuration persisted

@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"os"
+	"path"
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/memory"
@@ -27,13 +28,14 @@ const persistFile = "mysql.bin"
 
 // MySQLPersister is an example struct which handles the persistence of the data in the "mysql" database.
 type MySQLPersister struct {
+	FilePath string
 }
 
 var _ mysql_db.MySQLDbPersistence = (*MySQLPersister)(nil)
 
 // Persist implements the interface mysql_db.MySQLDbPersistence.
 func (m *MySQLPersister) Persist(ctx *sql.Context, data []byte) error {
-	return os.WriteFile(persistFile, data, 0644)
+	return os.WriteFile(m.FilePath, data, 0644)
 }
 
 // https://github.com/dolthub/go-mysql-server/blob/main/_example/users_example.go
@@ -51,11 +53,11 @@ func setPersister(provider sql.DatabaseProvider, engine *sqle.Engine) error {
 	// The persister here simply stands-in for your provided persistence function. The database calls this whenever it
 	// needs to save any changes to any of the "mysql" database's tables. The memory session persists in memory,
 	// but can be swapped out with the lines below
-	persister := &MySQLPersister{}
+	persister := &MySQLPersister{FilePath: path.Join(dataDirectory, persistFile)}
 	mysqlDb.SetPersister(persister)
 
-	if _, err := os.Stat(persistFile); err == nil {
-		data, err := os.ReadFile(persistFile)
+	if _, err := os.Stat(persister.FilePath); err == nil {
+		data, err := os.ReadFile(persister.FilePath)
 		if err != nil {
 			return err
 		}

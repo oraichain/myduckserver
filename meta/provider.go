@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"path/filepath"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,26 +11,30 @@ import (
 
 	"github.com/dolthub/go-mysql-server/sql"
 	_ "github.com/marcboeker/go-duckdb"
+
+	"github.com/apecloud/myduckserver/configuration"
 )
 
 type DbProvider struct {
 	mu          *sync.RWMutex
 	storage     *stdsql.DB
 	catalogName string
+	dataDir     string
 }
 
 var _ sql.DatabaseProvider = (*DbProvider)(nil)
 var _ sql.MutableDatabaseProvider = (*DbProvider)(nil)
+var _ configuration.DataDirProvider = (*DbProvider)(nil)
 
 func NewInMemoryDBProvider() *DbProvider {
-	prov, err := NewDBProvider("")
+	prov, err := NewDBProvider(".", "")
 	if err != nil {
 		panic(err)
 	}
 	return prov
 }
 
-func NewDBProvider(dbFile string) (*DbProvider, error) {
+func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
 	dbFile = strings.TrimSpace(dbFile)
 	name := ""
 	if dbFile == "" {
@@ -39,7 +44,7 @@ func NewDBProvider(dbFile string) (*DbProvider, error) {
 		name = strings.Split(dbFile, ".")[0]
 	}
 
-	storage, err := stdsql.Open("duckdb", dbFile)
+	storage, err := stdsql.Open("duckdb", filepath.Join(dataDir, dbFile))
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +52,7 @@ func NewDBProvider(dbFile string) (*DbProvider, error) {
 		mu:          &sync.RWMutex{},
 		storage:     storage,
 		catalogName: name,
+		dataDir:     dataDir,
 	}, nil
 }
 
@@ -60,6 +66,10 @@ func (prov *DbProvider) Storage() *stdsql.DB {
 
 func (prov *DbProvider) CatalogName() string {
 	return prov.catalogName
+}
+
+func (prov *DbProvider) DataDir() string {
+	return prov.dataDir
 }
 
 // AllDatabases implements sql.DatabaseProvider.
