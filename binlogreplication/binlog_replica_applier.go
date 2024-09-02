@@ -184,7 +184,7 @@ func (a *binlogReplicaApplier) startReplicationEventStream(ctx *sql.Context, con
 		return err
 	}
 
-	position, err := positionStore.Load()
+	position, err := positionStore.Load(a.engine)
 	if err != nil {
 		return err
 	}

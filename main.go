@@ -82,7 +82,7 @@ func main() {
 		Protocol: "tcp",
 		Address:  fmt.Sprintf("%s:%d", address, port),
 	}
-	s, err := server.NewServerWithHandler(config, engine, wrapSessionBuilder(provider), nil, wrapHandler(builder))
+	s, err := server.NewServerWithHandler(config, engine, NewSessionBuilder(provider), nil, wrapHandler(builder))
 	if err != nil {
 		panic(err)
 	}

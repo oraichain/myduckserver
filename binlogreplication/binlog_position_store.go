@@ -45,25 +45,26 @@ type binlogPositionStore struct {
 // represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
 // default binlog channel ("") is supported. If no .replica/binlog-position file is stored, this method returns a nil
 // mysql.Position and a nil error. If any errors are encountered, a nil mysql.Position and an error are returned.
-func (store *binlogPositionStore) Load() (*mysql.Position, error) {
+func (store *binlogPositionStore) Load(engine *gms.Engine) (*mysql.Position, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	_, err := os.Stat(binlogPositionDirectory)
+	dir := filepath.Join(getDataDir(engine), binlogPositionDirectory)
+	_, err := os.Stat(dir)
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	_, err = os.Stat(filepath.Join(binlogPositionDirectory, binlogPositionFilename))
+	_, err = os.Stat(filepath.Join(dir, binlogPositionFilename))
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	filePath, err := filepath.Abs(filepath.Join(binlogPositionDirectory, binlogPositionFilename))
+	filePath, err := filepath.Abs(filepath.Join(dir, binlogPositionFilename))
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +121,11 @@ func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, pos
 // Delete deletes the stored mysql.Position information stored in .replica/binlog-position in the root of the provider's
 // filesystem. This is useful for the "RESET REPLICA" command, since it clears out the current replication state. If
 // any errors are encountered removing the position file, an error is returned.
-func (store *binlogPositionStore) Delete(ctx *sql.Context) error {
+func (store *binlogPositionStore) Delete(ctx *sql.Context, engine *gms.Engine) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	return os.Remove(filepath.Join(binlogPositionDirectory, binlogPositionFilename))
+	return os.Remove(filepath.Join(getDataDir(engine), binlogPositionDirectory, binlogPositionFilename))
 }
 
 // createReplicaDir creates the .replica directory if it doesn't already exist.

@@ -15,6 +15,9 @@ package main
 
 import (
 	"context"
+	stdsql "database/sql"
+	"fmt"
+	"strconv"
 
 	"github.com/apecloud/myduckserver/meta"
 	"github.com/dolthub/go-mysql-server/memory"
@@ -22,11 +25,18 @@ import (
 	"github.com/dolthub/vitess/go/mysql"
 )
 
-// copy from memory/session.go
-// NewSessionBuilder returns a session for the given in-memory database provider suitable to use in a test server
-// This can't be defined as server.SessionBuilder because importing it would create a circular dependency,
-// but it's the same signature.
-func NewSessionBuilder(pro *meta.DbProvider) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
+type Session struct {
+	*memory.Session
+	db *meta.DbProvider
+}
+
+// NewSessionBuilder returns a session builder for the given database provider.
+func NewSessionBuilder(provider *meta.DbProvider) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
+	_, err := provider.Storage().Exec("CREATE TABLE IF NOT EXISTS main.persistent_variables (name TEXT PRIMARY KEY, value TEXT, type TEXT)")
+	if err != nil {
+		panic(err)
+	}
+
 	return func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
 		host := ""
 		user := ""
@@ -38,19 +48,61 @@ func NewSessionBuilder(pro *meta.DbProvider) func(ctx context.Context, conn *mys
 
 		client := sql.Client{Address: host, User: user, Capabilities: conn.Capabilities}
 		baseSession := sql.NewBaseSessionWithClientServer(addr, client, conn.ConnectionID)
-		return memory.NewSession(baseSession, pro), nil
+		memSession := memory.NewSession(baseSession, provider)
+		return Session{memSession, provider}, nil
 	}
 }
 
-var globals = make(map[string]interface{})
+var _ sql.PersistableSession = (*Session)(nil)
 
-func wrapSessionBuilder(provider *meta.DbProvider) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
-	return func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
-		session, err := NewSessionBuilder(provider)(ctx, conn, addr)
-		if err != nil {
-			return nil, err
+// PersistGlobal implements sql.PersistableSession.
+func (sess Session) PersistGlobal(sysVarName string, value interface{}) error {
+	if _, _, ok := sql.SystemVariables.GetGlobal(sysVarName); !ok {
+		return sql.ErrUnknownSystemVariable.New(sysVarName)
+	}
+	_, err := sess.db.Storage().Exec(
+		"INSERT OR REPLACE INTO main.persistent_variables (name, value, vtype) VALUES (?, ?, ?)",
+		sysVarName, value, fmt.Sprintf("%T", value),
+	)
+	return err
+}
+
+// RemovePersistedGlobal implements sql.PersistableSession.
+func (sess Session) RemovePersistedGlobal(sysVarName string) error {
+	_, err := sess.db.Storage().Exec(
+		"DELETE FROM main.persistent_variables WHERE name = ?",
+		sysVarName,
+	)
+	return err
+}
+
+// RemoveAllPersistedGlobals implements sql.PersistableSession.
+func (sess Session) RemoveAllPersistedGlobals() error {
+	_, err := sess.db.Storage().Exec("DELETE FROM main.persistent_variables")
+	return err
+}
+
+// GetPersistedValue implements sql.PersistableSession.
+func (sess Session) GetPersistedValue(k string) (interface{}, error) {
+	var value, vtype string
+	err := sess.db.Storage().QueryRow(
+		"SELECT value, vtype FROM main.persistent_variables WHERE name = ?", k,
+	).Scan(&value, &vtype)
+	switch {
+	case err == stdsql.ErrNoRows:
+		return nil, nil
+	case err != nil:
+		return nil, err
+	default:
+		switch vtype {
+		case "string":
+			return value, nil
+		case "int":
+			return strconv.Atoi(value)
+		case "bool":
+			return value == "true", nil
+		default:
+			return nil, fmt.Errorf("unknown variable type %s", vtype)
 		}
-		session.(*memory.Session).SetGlobals(globals)
-		return session, nil
 	}
 }
