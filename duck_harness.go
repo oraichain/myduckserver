@@ -173,10 +173,44 @@ func (s SkippingDuckHarness) SkipQueryTest(query string) bool {
 }
 
 func (m *DuckHarness) Setup(setupData ...[]setup.SetupScript) {
+	// skip unsupported setup
+	skippedSetup := [][]setup.SetupScript{
+		setup.Fk_tblData,     // Skip foreign key setup (not supported)
+		setup.TypestableData, // Skip enum/set type setup (not supported)
+	}
+
 	m.setupData = nil
 	for i := range setupData {
+		skip := false
+		for _, skipped := range skippedSetup {
+			if sameSetupScript(setupData[i], skipped) {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+
 		m.setupData = append(m.setupData, setupData[i]...)
 	}
+}
+
+func sameSetupScript(a, b []setup.SetupScript) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if a[i][j] != b[i][j] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (m *DuckHarness) NewEngine(t *testing.T) (enginetest.QueryEngine, error) {

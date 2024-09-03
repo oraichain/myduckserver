@@ -50,6 +50,12 @@ func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+	// load json extension
+	_, err = storage.Exec("load json")
+	if err != nil {
+		return nil, err
+	}
+
 	return &DbProvider{
 		mu:          &sync.RWMutex{},
 		storage:     storage,

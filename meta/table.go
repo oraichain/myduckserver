@@ -303,14 +303,14 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 	var sqlsBuilder strings.Builder
 	sqlsBuilder.WriteString(fmt.Sprintf(`CREATE %s INDEX "%s" ON %s (%s)`,
 		unique,
-		indexDef.Name,
+		EncodeIndexName(t.name, indexDef.Name),
 		FullTableName(t.db.catalogName, t.db.name, t.name),
 		strings.Join(columns, ", ")))
 
 	// Add the index comment if provided
 	if indexDef.Comment != "" {
 		sqlsBuilder.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS %s",
-			FullIndexName(t.db.catalogName, t.db.name, indexDef.Name),
+			FullIndexName(t.db.catalogName, t.db.name, EncodeIndexName(t.name, indexDef.Name)),
 			NewComment(indexDef.Comment).Encode()))
 	}
 
@@ -335,7 +335,7 @@ func (t *Table) DropIndex(ctx *sql.Context, indexName string) error {
 	// DuckDB requires switching context to the schema by USE statement
 	sql := fmt.Sprintf(`USE %s; DROP INDEX "%s"`,
 		FullSchemaName(t.db.catalogName, t.db.name),
-		indexName)
+		EncodeIndexName(t.name, indexName))
 
 	// Execute the SQL statement to drop the index
 	_, err := t.db.storage.Exec(sql)
@@ -367,13 +367,15 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 
 	indexes := []sql.Index{}
 	for rows.Next() {
-		var indexName string
+		var encodedIndexName string
 		var comment stdsql.NullString
 		var isUnique bool
 
-		if err := rows.Scan(&indexName, &isUnique, &comment); err != nil {
+		if err := rows.Scan(&encodedIndexName, &isUnique, &comment); err != nil {
 			return nil, ErrDuckDB.New(err)
 		}
+
+		_, indexName := DecodeIndexName(encodedIndexName)
 
 		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, DecodeComment(comment.String)))
 	}
