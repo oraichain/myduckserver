@@ -64,7 +64,7 @@ func TestDebugHarness(t *testing.T) {
 	setupData := []setup.SetupScript{{
 		`create database if not exists mydb`,
 		`use mydb`,
-		"create table mytable (i bigint primary key, s varchar(20) comment 'column s' NOT NULL)",
+		"create table mytable (i bigint primary key, s CHAR(20) comment 'column s' NOT NULL)",
 	}}
 
 	harness.Setup(setupData)
