@@ -61,9 +61,9 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 	case sqltypes.Uint16:
 		return newDT("USMALLINT"), nil
 	case sqltypes.Int24:
-		return newDT("INTEGER"), nil
+		return newDuckType("INTEGER", "MEDIUMINT"), nil
 	case sqltypes.Uint24:
-		return newDT("UINTEGER"), nil
+		return newDuckType("UINTEGER", "UMEDIUMINT"), nil
 	case sqltypes.Int32:
 		return newDT("INTEGER"), nil
 	case sqltypes.Uint32:
@@ -109,7 +109,7 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 	case sqltypes.VarBinary:
 		return newDuckTypeLength("BLOB", "VARBINARY", mysqlType.(sql.StringType).MaxCharacterLength()), nil
 	case sqltypes.Char:
-		return newDuckTypeLength("CHAR", "CHAR", mysqlType.(sql.StringType).MaxCharacterLength()), nil
+		return newDuckTypeLength("VARCHAR", "CHAR", mysqlType.(sql.StringType).MaxCharacterLength()), nil
 	case sqltypes.Binary:
 		return newDuckTypeLength("BLOB", "BINARY", mysqlType.(sql.StringType).MaxCharacterLength()), nil
 	case sqltypes.Bit:
@@ -146,9 +146,19 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 	case "USMALLINT":
 		return types.Uint16
 	case "INTEGER":
-		return types.Int32
+		{
+			if duckdbType.extra == "MEDIUMINT" {
+				return types.Int24
+			}
+			return types.Int32
+		}
 	case "UINTEGER":
-		return types.Uint32
+		{
+			if duckdbType.extra == "UMEDIUMINT" {
+				return types.Uint24
+			}
+			return types.Uint32
+		}
 	case "BIGINT":
 		return types.Int64
 	case "UBIGINT":
@@ -185,6 +195,8 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 				}
 			} else if myType == "VARCHAR" {
 				return types.MustCreateStringWithDefaults(sqltypes.VarChar, length)
+			} else if myType == "CHAR" {
+				return types.MustCreateStringWithDefaults(sqltypes.Char, length)
 			}
 			return types.Text
 		}
@@ -208,15 +220,6 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 				return types.MustCreateStringWithDefaults(sqltypes.Binary, length)
 			}
 			return types.Blob
-		}
-	case "CHAR":
-		{
-			myType, length := duckdbType.decodeExtra()
-
-			if myType == "CHAR" {
-				return types.MustCreateStringWithDefaults(sqltypes.Char, length)
-			}
-			return types.Text
 		}
 	case "BIT":
 		{
