@@ -243,9 +243,9 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 					return types.LongBlob
 				}
 			} else if myType == "VARBINARY" {
-				return types.MustCreateStringWithDefaults(sqltypes.VarBinary, length)
+				return types.MustCreateBinary(sqltypes.VarBinary, length)
 			} else if myType == "BINARY" {
-				return types.MustCreateStringWithDefaults(sqltypes.Binary, length)
+				return types.MustCreateBinary(sqltypes.Binary, length)
 			}
 			return types.Blob
 		}

@@ -262,12 +262,12 @@ func (t *Table) Updater(ctx *sql.Context) sql.RowUpdater {
 
 // Inserter implements sql.InsertableTable.
 func (t *Table) Inserter(*sql.Context) sql.RowInserter {
-	panic("unimplemented")
+	return nil
 }
 
 // Deleter implements sql.DeletableTable.
 func (t *Table) Deleter(*sql.Context) sql.RowDeleter {
-	panic("unimplemented")
+	return nil
 }
 
 // CreateIndex implements sql.IndexAlterableTable.

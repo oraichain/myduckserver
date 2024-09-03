@@ -120,7 +120,9 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		}
 	}
 
-	sql := fmt.Sprintf(`CREATE TABLE %s (%s`, FullTableName(d.catalogName, d.name, name), strings.Join(columns, ", "))
+	var sqlsBuild strings.Builder
+
+	sqlsBuild.WriteString(fmt.Sprintf(`CREATE TABLE %s (%s`, FullTableName(d.catalogName, d.name, name), strings.Join(columns, ", ")))
 
 	var primaryKeys []string
 	for pkord := range schema.PkOrdinals {
@@ -128,27 +130,31 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 	}
 
 	if len(primaryKeys) > 0 {
-		sql += fmt.Sprintf(", PRIMARY KEY (%s)", strings.Join(primaryKeys, ", "))
+		sqlsBuild.WriteString(fmt.Sprintf(", PRIMARY KEY (%s)", strings.Join(primaryKeys, ", ")))
 	}
 
-	sql += ")"
+	sqlsBuild.WriteString(")")
 
 	// Add comment to the table
 	if comment != "" {
-		sql += fmt.Sprintf("; COMMENT ON TABLE %s IS %s", FullTableName(d.catalogName, d.name, name), NewComment(comment).Encode())
+		sqlsBuild.WriteString(fmt.Sprintf("; COMMENT ON TABLE %s IS %s", FullTableName(d.catalogName, d.name, name), NewComment(comment).Encode()))
 	}
 
 	// Add column comments
 	for _, s := range columnCommentSQLs {
-		sql += ";" + s
+		sqlsBuild.WriteString(";")
+		sqlsBuild.WriteString(s)
 	}
 
-	_, err := d.storage.Exec(sql)
+	_, err := d.storage.Exec(sqlsBuild.String())
 	if err != nil {
+		if IsDuckDBTableAlreadyExistsError(err) {
+			return sql.ErrTableAlreadyExists.New(name)
+		}
 		return ErrDuckDB.New(err)
 	}
 
-	// TODO: support collation and comment
+	// TODO: support collation
 
 	return nil
 }
@@ -161,6 +167,9 @@ func (d *Database) DropTable(ctx *sql.Context, name string) error {
 	_, err := d.storage.Exec(fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalogName, d.name, name)))
 
 	if err != nil {
+		if IsDuckDBTableNotFoundError(err) {
+			return sql.ErrTableNotFound.New(name)
+		}
 		return ErrDuckDB.New(err)
 	}
 	return nil
@@ -259,6 +268,9 @@ func (d *Database) DropView(ctx *sql.Context, name string) error {
 
 	_, err := d.storage.Exec(fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalogName, d.name), name))
 	if err != nil {
+		if IsDuckDBViewNotFoundError(err) {
+			return sql.ErrViewDoesNotExist.New(name)
+		}
 		return ErrDuckDB.New(err)
 	}
 	return nil
