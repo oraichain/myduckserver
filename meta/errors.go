@@ -30,3 +30,8 @@ func IsDuckDBViewNotFoundError(err error) bool {
 func IsDuckDBSetSchemaNotFoundError(err error) bool {
 	return IsDuckDBCatalogError(err) && strings.Contains(err.Error(), "SET schema: No catalog + schema named")
 }
+
+// ERROR 1105 (HY000): duckdb: Catalog Error: Index with name "x_idx" already exists!
+func IsDuckDBIndexAlreadyExistsError(err error) bool {
+	return IsDuckDBCatalogError(err) && strings.Contains(err.Error(), "Index with name") && strings.Contains(err.Error(), "already exists")
+}

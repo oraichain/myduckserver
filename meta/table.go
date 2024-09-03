@@ -300,24 +300,26 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 	}
 
 	// Construct the SQL statement for creating the index
-	// DuckDB has very strange behavior that can't use full index name, so we have to switch context to the schema by USE statement
-	sql := fmt.Sprintf(`USE %s; CREATE %s INDEX "%s" ON %s (%s)`,
-		FullSchemaName(t.db.catalogName, t.db.name),
+	var sqlsBuilder strings.Builder
+	sqlsBuilder.WriteString(fmt.Sprintf(`CREATE %s INDEX "%s" ON %s (%s)`,
 		unique,
 		indexDef.Name,
 		FullTableName(t.db.catalogName, t.db.name, t.name),
-		strings.Join(columns, ", "))
+		strings.Join(columns, ", ")))
 
 	// Add the index comment if provided
 	if indexDef.Comment != "" {
-		sql += fmt.Sprintf("; COMMENT ON INDEX %s IS %s",
+		sqlsBuilder.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS %s",
 			FullIndexName(t.db.catalogName, t.db.name, indexDef.Name),
-			NewComment(indexDef.Comment).Encode())
+			NewComment(indexDef.Comment).Encode()))
 	}
 
 	// Execute the SQL statement to create the index
-	_, err := t.db.storage.Exec(sql)
+	_, err := t.db.storage.Exec(sqlsBuilder.String())
 	if err != nil {
+		if IsDuckDBIndexAlreadyExistsError(err) {
+			return sql.ErrDuplicateKey.New(indexDef.Name)
+		}
 		return ErrDuckDB.New(err)
 	}
 
