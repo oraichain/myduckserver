@@ -65,6 +65,9 @@ func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string)
 			return nil, err
 		} else if currentSchema != schemaName {
 			if _, err := conn.ExecContext(ctx, "USE "+meta.FullSchemaName(b.catalogName, schemaName)); err != nil {
+				if meta.IsDuckDBSetSchemaNotFoundError(err) {
+					return nil, sql.ErrDatabaseNotFound.New(schemaName)
+				}
 				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
 				return nil, err
 			}
@@ -118,6 +121,9 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case *plan.Use:
 		useStmt := "USE " + meta.FullSchemaName(b.catalogName, node.Database().Name())
 		if _, err := conn.ExecContext(ctx.Context, useStmt); err != nil {
+			if meta.IsDuckDBSetSchemaNotFoundError(err) {
+				return nil, sql.ErrDatabaseNotFound.New(node.Database().Name())
+			}
 			return nil, err
 		}
 		return b.base.Build(ctx, root, r)

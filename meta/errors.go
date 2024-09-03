@@ -25,3 +25,8 @@ func IsDuckDBTableNotFoundError(err error) bool {
 func IsDuckDBViewNotFoundError(err error) bool {
 	return IsDuckDBCatalogError(err) && strings.Contains(err.Error(), "View with name") && strings.Contains(err.Error(), "does not exist")
 }
+
+// ERROR 1105 (HY000): unknown error: Catalog Error: SET schema: No catalog + schema named "mysql.db0" found.
+func IsDuckDBSetSchemaNotFoundError(err error) bool {
+	return IsDuckDBCatalogError(err) && strings.Contains(err.Error(), "SET schema: No catalog + schema named")
+}
