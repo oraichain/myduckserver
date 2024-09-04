@@ -50,8 +50,14 @@ func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	// load json extension
-	_, err = storage.Exec("load json")
+
+	// install the json extension
+	_, err = storage.Exec("INSTALL json")
+	if err != nil {
+		return nil, err
+	}
+	// load the json extension
+	_, err = storage.Exec("LOAD json")
 	if err != nil {
 		return nil, err
 	}
