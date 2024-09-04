@@ -197,10 +197,7 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 		return nil, err
 	}
 
-	// Create a new iterator
-	iter := &SQLRowIter{rows: rows, schema: n.Schema()}
-
-	return iter, nil
+	return NewSQLRowIter(rows, n.Schema())
 }
 
 func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {

@@ -262,27 +262,27 @@ var allTypes = []typeDescription{
 			newTypeDescriptionAssertion("65535"),
 		},
 	},
-	// {
-	// 	TypeDefinition: "decimal",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("0"),
-	// 		newTypeDescriptionAssertion("1234567890"),
-	// 	},
-	// },
-	// {
-	// 	TypeDefinition: "decimal(10,2)",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("0.00"),
-	// 		newTypeDescriptionAssertion("12345678.00"),
-	// 	},
-	// },
-	// {
-	// 	TypeDefinition: "decimal(20,8)",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("-1234567890.12345678"),
-	// 		newTypeDescriptionAssertion("999999999999.00000001"),
-	// 	},
-	// },
+	{
+		TypeDefinition: "decimal",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("0"),
+			newTypeDescriptionAssertion("1234567890"),
+		},
+	},
+	{
+		TypeDefinition: "decimal(10,2)",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("0.00"),
+			newTypeDescriptionAssertion("12345678.00"),
+		},
+	},
+	{
+		TypeDefinition: "decimal(20,8)",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("-1234567890.12345678"),
+			newTypeDescriptionAssertion("999999999999.00000001"),
+		},
+	},
 
 	// Floating point types
 	{
