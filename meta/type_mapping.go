@@ -15,24 +15,24 @@ import (
 // The current large mapping function is error-prone and difficult to maintain.
 
 type duckType struct {
-	str   string
-	extra string // extra is only used for some types to specify the original type in the mysqlType string, e.g. "VARCHAR(255)", "DATETIME", "YEAR"
+	name   string
+	myType string // myType is only used for some types to specify the original type in the mysqlType string, e.g. "VARCHAR(255)", "DATETIME", "YEAR"
 }
 
-func newDT(str string) duckType {
-	return newDuckType(str, "")
+func newDT(name string) duckType {
+	return newDuckType(name, "")
 }
 
-func newDuckType(str, extra string) duckType {
-	return duckType{str: str, extra: extra}
+func newDuckType(name, myType string) duckType {
+	return duckType{name: name, myType: myType}
 }
 
-func newDuckTypeLength(str, extra string, length int64) duckType {
-	return newDuckType(str, fmt.Sprintf("%s(%d)", extra, length))
+func newDuckTypeLength(name, myType string, length int64) duckType {
+	return newDuckType(name, fmt.Sprintf("%s(%d)", myType, length))
 }
 
-func newNumberType(str string, displayWidth int) duckType {
-	return newDuckTypeLength(str, str, int64(displayWidth))
+func newNumberType(name string, displayWidth int) duckType {
+	return newDuckTypeLength(name, name, int64(displayWidth))
 }
 
 func newMediumIntType(displayWidth int) duckType {
@@ -43,24 +43,39 @@ func newUnsignedMediumIntType(displayWidth int) duckType {
 	return newDuckTypeLength("UINTEGER", "UMEDIUMINT", int64(displayWidth))
 }
 
-func (d duckType) decodeExtra() (string, int64) {
-	if d.extra == "" {
+func newDateTimeType(myTypeName string, precision int) duckType {
+	// precision is [0, 6], round up to 3
+
+	name := "TIMESTAMP"
+	if precision == 0 {
+		name = "TIMESTAMP_S"
+	} else if precision <= 3 {
+		name = "TIMESTAMP_MS"
+	} else if precision <= 6 {
+		name = "TIMESTAMP" // us
+	}
+
+	return newDuckTypeLength(name, myTypeName, int64(precision))
+}
+
+func (d duckType) decodeMyType() (string, int64) {
+	if d.myType == "" {
 		return "", 0
 	}
-	extraParts := strings.Split(d.extra, "(")
-	if len(extraParts) == 1 {
+	parts := strings.Split(d.myType, "(")
+	if len(parts) == 1 {
 		// no parameters
-		return d.extra, 0
+		return d.myType, 0
 	}
-	if len(extraParts) != 2 {
-		panic(fmt.Sprintf("invalid extra string: %s", d.extra))
+	if len(parts) != 2 {
+		panic(fmt.Sprintf("invalid MySQL Type string: %s", d.myType))
 	}
-	lengthStr := strings.TrimSuffix(extraParts[1], ")")
+	lengthStr := strings.TrimSuffix(parts[1], ")")
 	length, err := strconv.ParseInt(lengthStr, 10, 64)
 	if err != nil {
-		panic(fmt.Sprintf("invalid extra string: %s, error: %v", d.extra, err))
+		panic(fmt.Sprintf("invalid MySQL Type string: %s, error: %v", d.myType, err))
 	}
-	return extraParts[0], length
+	return parts[0], length
 }
 
 const DuckDBDecimalTypeMaxPrecision = 38
@@ -94,13 +109,13 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 	case sqltypes.Float64:
 		return newDT("DOUBLE"), nil
 	case sqltypes.Timestamp:
-		return newDT("TIMESTAMP"), nil // TODO: check if this is correct
+		return newDateTimeType("TIMESTAMP", mysqlType.(sql.DatetimeType).Precision()), nil // TODO: check if this is correct
 	case sqltypes.Date:
 		return newDT("DATE"), nil
 	case sqltypes.Time:
 		return newDT("TIME"), nil
 	case sqltypes.Datetime:
-		return newDuckType("TIMESTAMP", "DATETIME"), nil
+		return newDateTimeType("DATETIME", mysqlType.(sql.DatetimeType).Precision()), nil
 	case sqltypes.Year:
 		return newDuckType("SMALLINT", "YEAR"), nil
 	case sqltypes.Decimal:
@@ -142,13 +157,13 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 
 func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uint8) sql.Type {
 	// TODO: The current type mappings are not lossless. We need to store the original type in the column comments.
-	duckdbTypeStr := strings.TrimSpace(strings.ToUpper(duckdbType.str))
+	duckdbTypeStr := strings.TrimSpace(strings.ToUpper(duckdbType.name))
 
 	if strings.HasPrefix(duckdbTypeStr, "DECIMAL") {
 		duckdbTypeStr = "DECIMAL"
 	}
 
-	myType, length := duckdbType.decodeExtra()
+	myTypeName, length := duckdbType.decodeMyType()
 
 	// process integer types, they all have displayWidth
 	intBaseType := sqltypes.Null
@@ -159,7 +174,7 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 		intBaseType = sqltypes.Uint8
 	case "SMALLINT":
 		{
-			if myType == "YEAR" {
+			if myTypeName == "YEAR" {
 				return types.Year
 			}
 			intBaseType = sqltypes.Int16
@@ -168,7 +183,7 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 		intBaseType = sqltypes.Uint16
 	case "INTEGER":
 		{
-			if myType == "MEDIUMINT" {
+			if myTypeName == "MEDIUMINT" {
 				intBaseType = sqltypes.Int24
 			} else {
 				intBaseType = sqltypes.Int32
@@ -176,7 +191,7 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 		}
 	case "UINTEGER":
 		{
-			if myType == "UMEDIUMINT" {
+			if myTypeName == "UMEDIUMINT" {
 				intBaseType = sqltypes.Uint24
 			} else {
 				intBaseType = sqltypes.Uint32
@@ -197,12 +212,19 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 		return types.Float32
 	case "DOUBLE":
 		return types.Float64
-	case "TIMESTAMP":
+	case "TIMESTAMP", "TIMESTAMP_S", "TIMESTAMP_MS":
 		{
-			if myType == "DATETIME" {
-				return types.Datetime
+			precision := 6
+			if duckdbTypeStr == "TIMESTAMP_S" {
+				precision = 0
+			} else if duckdbTypeStr == "TIMESTAMP_MS" {
+				precision = 3
 			}
-			return types.Timestamp
+
+			if myTypeName == "DATETIME" {
+				return types.MustCreateDatetimeType(sqltypes.Datetime, precision)
+			}
+			return types.MustCreateDatetimeType(sqltypes.Timestamp, precision)
 		}
 	case "DATE":
 		return types.Date
@@ -212,7 +234,7 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 		return types.MustCreateDecimalType(numericPrecision, numericScale)
 	case "VARCHAR":
 		{
-			if myType == "TEXT" {
+			if myTypeName == "TEXT" {
 				if length <= types.TinyTextBlobMax {
 					return types.TinyText
 				} else if length <= types.TextBlobMax {
@@ -222,9 +244,9 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 				} else {
 					return types.LongText
 				}
-			} else if myType == "VARCHAR" {
+			} else if myTypeName == "VARCHAR" {
 				return types.MustCreateStringWithDefaults(sqltypes.VarChar, length)
-			} else if myType == "CHAR" {
+			} else if myTypeName == "CHAR" {
 				return types.MustCreateStringWithDefaults(sqltypes.Char, length)
 			}
 			return types.Text
@@ -232,7 +254,7 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 	case "BLOB":
 		{
 
-			if myType == "BLOB" {
+			if myTypeName == "BLOB" {
 				if length <= types.TinyTextBlobMax {
 					return types.TinyBlob
 				} else if length <= types.TextBlobMax {
@@ -242,16 +264,16 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 				} else {
 					return types.LongBlob
 				}
-			} else if myType == "VARBINARY" {
+			} else if myTypeName == "VARBINARY" {
 				return types.MustCreateBinary(sqltypes.VarBinary, length)
-			} else if myType == "BINARY" {
+			} else if myTypeName == "BINARY" {
 				return types.MustCreateBinary(sqltypes.Binary, length)
 			}
 			return types.Blob
 		}
 	case "BIT":
 		{
-			if myType == "BIT" {
+			if myTypeName == "BIT" {
 				return types.MustCreateBitType(uint8(length))
 			}
 			return types.MustCreateBitType(types.BitTypeMaxBits)

@@ -100,7 +100,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		if err != nil {
 			return err
 		}
-		colDef := fmt.Sprintf(`"%s" %s`, col.Name, typ.str)
+		colDef := fmt.Sprintf(`"%s" %s`, col.Name, typ.name)
 		if col.Nullable {
 			colDef += " NULL"
 		} else {
@@ -113,10 +113,10 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 
 		columns = append(columns, colDef)
 
-		if col.Comment != "" || typ.extra != "" {
+		if col.Comment != "" || typ.myType != "" {
 			columnCommentSQLs = append(columnCommentSQLs,
 				fmt.Sprintf(`COMMENT ON COLUMN %s IS %s`, FullColumnName(d.catalogName, d.name, name, col.Name),
-					NewCommentWithMeta(col.Comment, typ.extra).Encode()))
+					NewCommentWithMeta(col.Comment, typ.myType).Encode()))
 		}
 	}
 

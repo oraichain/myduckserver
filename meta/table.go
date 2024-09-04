@@ -172,7 +172,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 		return err
 	}
 
-	sql := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "%s" %s`, FullTableName(t.db.catalogName, t.db.name, t.name), column.Name, typ.str)
+	sql := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "%s" %s`, FullTableName(t.db.catalogName, t.db.name, t.name), column.Name, typ.name)
 
 	if !column.Nullable {
 		sql += " NOT NULL"
@@ -183,7 +183,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 	}
 
 	// add comment
-	comment := NewCommentWithMeta(column.Comment, typ.extra)
+	comment := NewCommentWithMeta(column.Comment, typ.myType)
 	sql += fmt.Sprintf(`; COMMENT ON COLUMN %s IS %s`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode())
 
 	_, err = t.db.storage.Exec(sql)
@@ -221,7 +221,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 
 	baseSQL := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN "%s"`, FullTableName(t.db.catalogName, t.db.name, t.name), columnName)
 	sqls := []string{
-		fmt.Sprintf(`%s TYPE %s`, baseSQL, typ.str),
+		fmt.Sprintf(`%s TYPE %s`, baseSQL, typ.name),
 	}
 
 	if column.Nullable {
@@ -241,7 +241,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	}
 
 	// alter comment
-	comment := NewCommentWithMeta(column.Comment, typ.extra)
+	comment := NewCommentWithMeta(column.Comment, typ.myType)
 	sqls = append(sqls, fmt.Sprintf(`COMMENT ON COLUMN %s IS %s`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode()))
 
 	joinedSQL := strings.Join(sqls, "; ")
