@@ -15,9 +15,9 @@ const (
 )
 
 type TableWriter interface {
-	Insert(ctx *sql.Context, row sql.Row) error
-	Delete(ctx *sql.Context, keys sql.Row) error
-	Update(ctx *sql.Context, keys sql.Row, values sql.Row) error
+	Insert(ctx *sql.Context, keyRows []sql.Row) error
+	Delete(ctx *sql.Context, keyRows []sql.Row) error
+	Update(ctx *sql.Context, keyRows []sql.Row, valueRows []sql.Row) error
 	Close() error
 }
 
@@ -26,7 +26,8 @@ type TableWriterProvider interface {
 	GetTableWriter(
 		ctx *sql.Context, engine *sqle.Engine,
 		databaseName, tableName string,
-		schema sql.Schema, columnCount int,
+		schema sql.Schema,
+		columnCount, rowCount int,
 		identifyColumns, dataColumns mysql.Bitmap,
 		eventType EventType,
 		foreignKeyChecksDisabled bool,

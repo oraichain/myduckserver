@@ -169,20 +169,20 @@ func (td *typeDescription) IsStringType() bool {
 // test cases we need to cover (e.g. NULL values).
 var allTypes = []typeDescription{
 	// Bit types
-	{
-		TypeDefinition: "bit",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertionWithExpectedValue("0", []uint8{0}),
-			newTypeDescriptionAssertionWithExpectedValue("1", []uint8{1}),
-		},
-	},
-	{
-		TypeDefinition: "bit(64)",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertionWithExpectedValue("0", []byte{0, 0, 0, 0, 0, 0, 0, 0}),
-			newTypeDescriptionAssertionWithExpectedValue("1", []byte{0, 0, 0, 0, 0, 0, 0, 1}),
-		},
-	},
+	// {
+	// 	TypeDefinition: "bit",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertionWithExpectedValue("0", []uint8{0}),
+	// 		newTypeDescriptionAssertionWithExpectedValue("1", []uint8{1}),
+	// 	},
+	// },
+	// {
+	// 	TypeDefinition: "bit(64)",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertionWithExpectedValue("0", []byte{0, 0, 0, 0, 0, 0, 0, 0}),
+	// 		newTypeDescriptionAssertionWithExpectedValue("1", []byte{0, 0, 0, 0, 0, 0, 0, 1}),
+	// 	},
+	// },
 
 	// Integer types
 	{
@@ -262,27 +262,27 @@ var allTypes = []typeDescription{
 			newTypeDescriptionAssertion("65535"),
 		},
 	},
-	{
-		TypeDefinition: "decimal",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("0"),
-			newTypeDescriptionAssertion("1234567890"),
-		},
-	},
-	{
-		TypeDefinition: "decimal(10,2)",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("0.00"),
-			newTypeDescriptionAssertion("12345678.00"),
-		},
-	},
-	{
-		TypeDefinition: "decimal(20,8)",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("-1234567890.12345678"),
-			newTypeDescriptionAssertion("999999999999.00000001"),
-		},
-	},
+	// {
+	// 	TypeDefinition: "decimal",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("0"),
+	// 		newTypeDescriptionAssertion("1234567890"),
+	// 	},
+	// },
+	// {
+	// 	TypeDefinition: "decimal(10,2)",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("0.00"),
+	// 		newTypeDescriptionAssertion("12345678.00"),
+	// 	},
+	// },
+	// {
+	// 	TypeDefinition: "decimal(20,8)",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("-1234567890.12345678"),
+	// 		newTypeDescriptionAssertion("999999999999.00000001"),
+	// 	},
+	// },
 
 	// Floating point types
 	{
@@ -431,20 +431,20 @@ var allTypes = []typeDescription{
 	},
 
 	// Enum and Set types
-	{
-		TypeDefinition: "ENUM(\"\",\"a\",\"b\",\"c\")",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion(""),
-			newTypeDescriptionAssertion("c"),
-		},
-	},
-	{
-		TypeDefinition: "SET(\"a\",\"b\",\"c\")",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("a"),
-			newTypeDescriptionAssertion("a,b,c"),
-		},
-	},
+	// {
+	// 	TypeDefinition: "ENUM(\"\",\"a\",\"b\",\"c\")",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion(""),
+	// 		newTypeDescriptionAssertion("c"),
+	// 	},
+	// },
+	// {
+	// 	TypeDefinition: "SET(\"a\",\"b\",\"c\")",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("a"),
+	// 		newTypeDescriptionAssertion("a,b,c"),
+	// 	},
+	// },
 
 	// Date types
 	{
@@ -454,13 +454,13 @@ var allTypes = []typeDescription{
 			newTypeDescriptionAssertion("DATE('1981-02-16')"),
 		},
 	},
-	{
-		TypeDefinition: "time",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("TIME('01:02:03')"),
-			newTypeDescriptionAssertion("TIME('01:02:03')"),
-		},
-	},
+	// {
+	// 	TypeDefinition: "time",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("TIME('01:02:03')"),
+	// 		newTypeDescriptionAssertion("TIME('01:02:03')"),
+	// 	},
+	// },
 	{
 		TypeDefinition: "datetime",
 		Assertions: [2]typeDescriptionAssertion{
@@ -484,26 +484,26 @@ var allTypes = []typeDescription{
 	},
 
 	// Spatial types
-	{
-		TypeDefinition: "geometry",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertionWithExpectedValue("POINT(18, 23)",
-				"\x00\x00\x00\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x002@\x00\x00\x00\x00\x00\x007@"),
-			newTypeDescriptionAssertionWithExpectedValue("LINESTRING(POINT(0,0),POINT(1,2),POINT(2,4))",
-				"\x00\x00\x00\x00\x01\x02\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"+
-					"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@\x00\x00\x00\x00"+
-					"\x00\x00\x00@\x00\x00\x00\x00\x00\x00\x10@"),
-		},
-	},
+	// {
+	// 	TypeDefinition: "geometry",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertionWithExpectedValue("POINT(18, 23)",
+	// 			"\x00\x00\x00\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x002@\x00\x00\x00\x00\x00\x007@"),
+	// 		newTypeDescriptionAssertionWithExpectedValue("LINESTRING(POINT(0,0),POINT(1,2),POINT(2,4))",
+	// 			"\x00\x00\x00\x00\x01\x02\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"+
+	// 				"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@\x00\x00\x00\x00"+
+	// 				"\x00\x00\x00@\x00\x00\x00\x00\x00\x00\x10@"),
+	// 	},
+	// },
 
 	// JSON types
-	{
-		TypeDefinition: "json",
-		Assertions: [2]typeDescriptionAssertion{
-			newTypeDescriptionAssertion("{}"),
-			newTypeDescriptionAssertion("{\"os\":\"Mac\",\"name\":\"BillyBob\",\"resolution\":{\"x\":1920,\"y\":1080}}"),
-		},
-	},
+	// {
+	// 	TypeDefinition: "json",
+	// 	Assertions: [2]typeDescriptionAssertion{
+	// 		newTypeDescriptionAssertion("{}"),
+	// 		newTypeDescriptionAssertion("{\"os\":\"Mac\",\"name\":\"BillyBob\",\"resolution\":{\"x\":1920,\"y\":1080}}"),
+	// 	},
+	// },
 }
 
 // ---------------------

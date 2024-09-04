@@ -521,16 +521,18 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		}
 
 	default:
-		// We can't access the bytes directly because these non-interface types in Vitess are not exposed.
-		// Having a Bytes() or Type() method on the Vitess interface would let us clean this up.
-		byteString := fmt.Sprintf("%v", event)
-		if strings.HasPrefix(byteString, "{[0 0 0 0 27 ") {
+		// https://mariadb.com/kb/en/2-binlog-event-header/
+		bytes := event.Bytes()
+		switch bytes[4] {
+		case 0x1b:
 			// Type 27 is a Heartbeat event. This event does not appear in the binary log. It's only sent over the
 			// network by a primary to a replica to let it know that the primary is still alive, and is only sent
 			// when the primary has no binlog events to send to replica servers.
 			// For more details, see: https://mariadb.com/kb/en/heartbeat_log_event/
 			ctx.GetLogger().Trace("Received binlog event: Heartbeat")
-		} else {
+		case 0x03:
+			ctx.GetLogger().Trace("Received binlog event: Stop")
+		default:
 			return fmt.Errorf("received unknown event: %v", event)
 		}
 	}
@@ -638,7 +640,8 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 	tableWriter, err := a.tableWriterProvider.GetTableWriter(
 		ctx, engine,
 		tableMap.Database, tableName,
-		schema, len(tableMap.Types),
+		schema,
+		len(tableMap.Types), len(rows.Rows),
 		rows.IdentifyColumns, rows.DataColumns,
 		typ,
 		foreignKeyChecksDisabled,
@@ -647,6 +650,8 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 		return err
 	}
 
+	identityRows := make([]sql.Row, 0, len(rows.Rows))
+	dataRows := make([]sql.Row, 0, len(rows.Rows))
 	for _, row := range rows.Rows {
 		var identityRow, dataRow sql.Row
 		if len(row.Identify) > 0 {
@@ -654,28 +659,32 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 			if err != nil {
 				return err
 			}
-			ctx.GetLogger().Tracef("     - Identity: %v ", sql.FormatRow(identityRow))
+			// `sql.FormatRow` could be used to format the row content in a more readable way for debugging purposes.
+			// But DO NOT use it in production, as it can be expensive.
+			ctx.GetLogger().Tracef("     - Identity: %#v ", identityRow)
 		}
+		identityRows = append(identityRows, identityRow)
 
 		if len(row.Data) > 0 {
 			dataRow, err = parseRow(ctx, engine, tableMap, schema, rows.DataColumns, row.NullColumns, row.Data)
 			if err != nil {
 				return err
 			}
-			ctx.GetLogger().Tracef("     - Data: %v ", sql.FormatRow(dataRow))
+			ctx.GetLogger().Tracef("     - Data: %#v ", dataRow)
 		}
+		dataRows = append(dataRows, dataRow)
+	}
 
-		switch {
-		case event.IsDeleteRows():
-			err = tableWriter.Delete(ctx, identityRow)
-		case event.IsWriteRows():
-			err = tableWriter.Insert(ctx, dataRow)
-		case event.IsUpdateRows():
-			err = tableWriter.Update(ctx, identityRow, dataRow)
-		}
-		if err != nil {
-			return err
-		}
+	switch {
+	case event.IsDeleteRows():
+		err = tableWriter.Delete(ctx, identityRows)
+	case event.IsWriteRows():
+		err = tableWriter.Insert(ctx, dataRows)
+	case event.IsUpdateRows():
+		err = tableWriter.Update(ctx, identityRows, dataRows)
+	}
+	if err != nil {
+		return err
 	}
 
 	ctx.GetLogger().WithFields(logrus.Fields{

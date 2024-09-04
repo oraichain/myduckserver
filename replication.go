@@ -17,6 +17,7 @@ import (
 	"context"
 	stdsql "database/sql"
 	"database/sql/driver"
+	"strings"
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/memory"
@@ -59,7 +60,8 @@ var _ binlogreplication.TableWriterProvider = &tableWriterProvider{}
 func (twp *tableWriterProvider) GetTableWriter(
 	ctx *sql.Context, engine *sqle.Engine,
 	databaseName, tableName string,
-	schema sql.Schema, columnCount int,
+	schema sql.Schema,
+	columnCount, rowCount int,
 	identifyColumns, dataColumns mysql.Bitmap,
 	eventType binlogreplication.EventType,
 	foreignKeyChecksDisabled bool,
@@ -67,7 +69,7 @@ func (twp *tableWriterProvider) GetTableWriter(
 	// if eventType == binlogreplication.InsertEvent {
 	// 	return twp.newTableAppender(ctx, databaseName, tableName, columnCount)
 	// }
-	return twp.newTableUpdater(ctx, databaseName, tableName, schema, columnCount, identifyColumns, dataColumns, eventType)
+	return twp.newTableUpdater(ctx, databaseName, tableName, schema, columnCount, rowCount, identifyColumns, dataColumns, eventType)
 }
 
 func (twp *tableWriterProvider) newTableAppender(
@@ -109,18 +111,20 @@ type tableAppender struct {
 
 var _ binlogreplication.TableWriter = &tableAppender{}
 
-func (ta *tableAppender) Insert(ctx *sql.Context, row sql.Row) error {
-	for i, v := range row {
-		ta.buffer[i] = v
+func (ta *tableAppender) Insert(ctx *sql.Context, rows []sql.Row) error {
+	for _, row := range rows {
+		for i, v := range row {
+			ta.buffer[i] = v
+		}
 	}
 	return ta.appender.AppendRow(ta.buffer...)
 }
 
-func (ta *tableAppender) Delete(ctx *sql.Context, keys sql.Row) error {
+func (ta *tableAppender) Delete(ctx *sql.Context, keyRows []sql.Row) error {
 	panic("not implemented")
 }
 
-func (ta *tableAppender) Update(ctx *sql.Context, keys sql.Row, values sql.Row) error {
+func (ta *tableAppender) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []sql.Row) error {
 	panic("not implemented")
 }
 
@@ -142,7 +146,8 @@ func isPkUpdate(schema sql.Schema, identifyColumns, dataColumns mysql.Bitmap) bo
 func (twp *tableWriterProvider) newTableUpdater(
 	ctx *sql.Context,
 	databaseName, tableName string,
-	schema sql.Schema, columnCount int,
+	schema sql.Schema,
+	columnCount, rowCount int,
 	identifyColumns, dataColumns mysql.Bitmap,
 	eventType binlogreplication.EventType,
 ) (*tableUpdater, error) {
@@ -151,74 +156,63 @@ func (twp *tableWriterProvider) newTableUpdater(
 		return nil, err
 	}
 
-	var sql string
-	replace := false
-	fullTableName := quoteIdentifier(databaseName) + "." + quoteIdentifier(tableName)
-	keyCount, dataCount := identifyColumns.BitCount(), dataColumns.BitCount()
+	var identifyIndex int
+	var pkColumns []int
+	var pkIndices []int
+	for i, c := range schema {
+		identify := identifyColumns.Count() > i && identifyColumns.Bit(i)
+		if c.PrimaryKey && !identify {
+			pkColumns = nil
+			pkIndices = nil
+			break
+		} else if c.PrimaryKey && identify {
+			pkColumns = append(pkColumns, i)
+			pkIndices = append(pkIndices, identifyIndex)
+		}
+		if identify {
+			identifyIndex++
+		}
+	}
+
+	var (
+		sql                 string
+		paramCount          int
+		pkUpdate            bool
+		replace             = false
+		reinsert            string
+		fullTableName       = quoteIdentifier(databaseName) + "." + quoteIdentifier(tableName)
+		keyCount, dataCount = identifyColumns.BitCount(), dataColumns.BitCount()
+	)
 	switch eventType {
 	case binlogreplication.DeleteEvent:
-		sql = "DELETE FROM " + fullTableName + " WHERE "
-		count := 0
-		for i := range columnCount {
-			if !identifyColumns.Bit(i) {
-				continue
-			}
-			sql += quoteIdentifier(schema[i].Name) + " = ?"
-			count++
-			if count < keyCount {
-				sql += " AND "
-			}
-		}
+		sql, paramCount = buildDeleteTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns)
 	case binlogreplication.UpdateEvent:
-		if keyCount < columnCount || dataCount < columnCount || isPkUpdate(schema, identifyColumns, dataColumns) {
-			sql = "UPDATE " + fullTableName + " SET "
-			count := 0
-			for i := range columnCount {
-				if !dataColumns.Bit(i) {
-					continue
-				}
-				sql += quoteIdentifier(schema[i].Name) + " = ?"
-				count++
-				if count < dataCount {
-					sql += ", "
-				}
-			}
-			sql += " WHERE "
-			count = 0
-			for i := range columnCount {
-				if !identifyColumns.Bit(i) {
-					continue
-				}
-				sql += quoteIdentifier(schema[i].Name) + " = ?"
-				count++
-				if count < keyCount {
-					sql += " AND "
-				}
-			}
+		pkUpdate = isPkUpdate(schema, identifyColumns, dataColumns)
+		if pkUpdate {
+			// If the primary key is being updated, we need to use DELETE + INSERT.
+			// For example, if the primary has executed `UPDATE t SET pk = pk + 1;`,
+			// then both `UPDATE` and `REPLACE` will fail on the replica because the primary key is being updated:
+			// - `UPDATE` will fail because of violation of the primary key constraint.
+			// - `REPLACE` will fail because it will insert a new row but leave the old row unchanged.
+			sql, paramCount = buildDeleteTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns)
+			reinsert, _ = buildInsertTemplate(fullTableName, columnCount, false)
+		} else if keyCount < columnCount || dataCount < columnCount {
+			sql, paramCount = buildUpdateTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns, dataColumns)
 		} else {
-			sql = "INSERT OR REPLACE INTO " + fullTableName + " VALUES ("
-			for i := range columnCount {
-				sql += "?"
-				if i < columnCount-1 {
-					sql += ", "
-				}
-			}
-			sql += ")"
+			sql, paramCount = buildInsertTemplate(fullTableName, columnCount, true)
 			replace = true
 		}
 	case binlogreplication.InsertEvent:
-		sql = "INSERT INTO " + fullTableName + " VALUES ("
-		for i := range columnCount {
-			sql += "?"
-			if i < columnCount-1 {
-				sql += ", "
-			}
-		}
-		sql += ")"
+		sql, paramCount = buildInsertTemplate(fullTableName, columnCount, false)
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"sql": sql,
+		"sql":       sql,
+		"replace":   replace,
+		"reinsert":  reinsert,
+		"keyCount":  keyCount,
+		"dataCount": dataCount,
+		"pkUpdate":  pkUpdate,
 	}).Infoln("Creating table updater...")
 
 	stmt, err := tx.PrepareContext(ctx.Context, sql)
@@ -228,40 +222,202 @@ func (twp *tableWriterProvider) newTableUpdater(
 	}
 
 	return &tableUpdater{
-		tx:      tx,
-		stmt:    stmt,
-		replace: replace,
+		db:         twp.db,
+		tx:         tx,
+		stmt:       stmt,
+		replace:    replace,
+		reinsert:   reinsert,
+		pkIndices:  pkIndices,
+		paramCount: paramCount,
 	}, nil
 }
 
+func buildInsertTemplate(tableName string, columnCount int, replace bool) (string, int) {
+	var builder strings.Builder
+	builder.Grow(32)
+	builder.WriteString("INSERT")
+	if replace {
+		builder.WriteString(" OR REPLACE")
+	}
+	builder.WriteString(" INTO ")
+	builder.WriteString(tableName)
+	builder.WriteString(" VALUES (")
+	for i := range columnCount {
+		builder.WriteString("?")
+		if i < columnCount-1 {
+			builder.WriteString(", ")
+		}
+	}
+	builder.WriteString(")")
+	return builder.String(), columnCount
+}
+
+func buildDeleteTemplate(tableName string, columnCount int, schema sql.Schema, pkColumns []int, identifyColumns mysql.Bitmap) (string, int) {
+	var builder strings.Builder
+	builder.Grow(32)
+	builder.WriteString("DELETE FROM ")
+	builder.WriteString(tableName)
+	builder.WriteString(" WHERE ")
+
+	if len(pkColumns) > 0 {
+		for i, c := range pkColumns {
+			if i > 0 {
+				builder.WriteString(" AND ")
+			}
+			builder.WriteString(quoteIdentifier(schema[c].Name))
+			builder.WriteString(" = ?")
+		}
+		return builder.String(), len(pkColumns)
+	}
+
+	count := 0
+	for i := range columnCount {
+		if identifyColumns.Bit(i) {
+			if count > 0 {
+				builder.WriteString(" AND ")
+			}
+			builder.WriteString(quoteIdentifier(schema[i].Name))
+			builder.WriteString(" = ?")
+			count++
+		}
+	}
+	return builder.String(), count
+}
+
+func buildUpdateTemplate(tableName string, columnCount int, schema sql.Schema, pkColumns []int, identifyColumns, dataColumns mysql.Bitmap) (string, int) {
+	var builder strings.Builder
+	builder.Grow(32)
+	builder.WriteString("UPDATE ")
+	builder.WriteString(tableName)
+	builder.WriteString(" SET ")
+	count := 0
+	dataCount := dataColumns.BitCount()
+	for i := range columnCount {
+		if dataColumns.Bit(i) {
+			if count > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(quoteIdentifier(schema[i].Name))
+			builder.WriteString(" = ?")
+			count++
+		}
+	}
+	builder.WriteString(" WHERE ")
+
+	if len(pkColumns) > 0 {
+		for i, c := range pkColumns {
+			if i > 0 {
+				builder.WriteString(" AND ")
+			}
+			builder.WriteString(quoteIdentifier(schema[c].Name))
+			builder.WriteString(" = ?")
+		}
+		return builder.String(), dataCount + len(pkColumns)
+	}
+
+	count = 0
+	for i := range columnCount {
+		if identifyColumns.Bit(i) {
+			if count > 0 {
+				builder.WriteString(" AND ")
+			}
+			builder.WriteString(quoteIdentifier(schema[i].Name))
+			builder.WriteString(" = ?")
+			count++
+		}
+	}
+	return builder.String(), dataCount + identifyColumns.BitCount()
+}
+
 type tableUpdater struct {
-	tx      *stdsql.Tx
-	stmt    *stdsql.Stmt
-	replace bool
+	db         *stdsql.DB
+	tx         *stdsql.Tx
+	stmt       *stdsql.Stmt
+	replace    bool
+	reinsert   string
+	paramCount int
+	pkIndices  []int
 }
 
 var _ binlogreplication.TableWriter = &tableUpdater{}
 
-func (tu *tableUpdater) Insert(ctx *sql.Context, row sql.Row) error {
-	_, err := tu.stmt.ExecContext(ctx.Context, row...)
-	return err
-}
-
-func (tu *tableUpdater) Delete(ctx *sql.Context, keys sql.Row) error {
-	_, err := tu.stmt.ExecContext(ctx.Context, keys...)
-	return err
-}
-
-func (tu *tableUpdater) Update(ctx *sql.Context, keys sql.Row, values sql.Row) error {
-	if tu.replace {
-		return tu.Insert(ctx, values)
+func (tu *tableUpdater) Insert(ctx *sql.Context, rows []sql.Row) error {
+	for _, row := range rows {
+		if _, err := tu.stmt.ExecContext(ctx.Context, row...); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+func (tu *tableUpdater) Delete(ctx *sql.Context, keyRows []sql.Row) error {
+	buf := make(sql.Row, len(tu.pkIndices))
+	for _, row := range keyRows {
+		var keys sql.Row
+		if len(tu.pkIndices) > 0 {
+			for i, idx := range tu.pkIndices {
+				buf[i] = row[idx]
+			}
+			keys = buf
+		} else {
+			keys = row
+		}
+		if _, err := tu.stmt.ExecContext(ctx.Context, keys...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tu *tableUpdater) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []sql.Row) error {
+	if tu.replace {
+		return tu.Insert(ctx, valueRows)
+	}
+
+	// https://duckdb.org/docs/sql/indexes#over-eager-unique-constraint-checking
+	if tu.reinsert != "" {
+		var err error
+		// DELETE
+		if err = tu.Delete(ctx, keyRows); err != nil {
+			return err
+		}
+		if err = tu.stmt.Close(); err != nil {
+			return err
+		}
+		if err = tu.tx.Commit(); err != nil {
+			return err
+		}
+
+		tu.tx, err = tu.db.BeginTx(ctx.Context, nil)
+		if err != nil {
+			return err
+		}
+		tu.stmt, err = tu.tx.PrepareContext(ctx.Context, tu.reinsert)
+		if err != nil {
+			return err
+		}
+		// INSERT
+		return tu.Insert(ctx, valueRows)
+	}
+
 	// UPDATE t SET col1 = ?, col2 = ? WHERE key1 = ? AND key2 = ?
-	args := make([]interface{}, len(keys)+len(values))
-	copy(args, values)
-	copy(args[len(values):], keys)
-	_, err := tu.stmt.ExecContext(ctx.Context, args...)
-	return err
+	buf := make([]interface{}, tu.paramCount)
+	for i, values := range valueRows {
+		keys := keyRows[i]
+		copy(buf, values)
+		if len(tu.pkIndices) > 0 {
+			for j, idx := range tu.pkIndices {
+				buf[len(values)+j] = keys[idx]
+			}
+		} else {
+			copy(buf[len(values):], keys)
+		}
+		args := buf[:len(values)+len(keys)]
+		if _, err := tu.stmt.ExecContext(ctx.Context, args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tu *tableUpdater) Close() error {
