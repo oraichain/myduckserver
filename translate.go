@@ -77,16 +77,21 @@ RESULT_OK = %q
 RESULT_ERR = %q
 
 def read_bytes(n: int):
-    bytes = []
+    bytes = b''
     while n > 0:
-        bytes += sys.stdin.buffer.read(n)
-        n -= len(bytes)
+        reads = sys.stdin.buffer.read(n)
+        if len(reads) == 0:
+            # The stdin has been closed, indicating that the parent process has exited.
+            # We should exit the child process to prevent orphan Python processes.
+            raise EOFError("EOF")
+        bytes += reads
+        n -= len(reads)
     return bytes
 
 def read_string():
     data = read_bytes(4)
     length = int.from_bytes(data, byteorder='big')
-    data = sys.stdin.buffer.read(length)
+    data = read_bytes(length)
     return data.decode('utf-8')
 
 def write_string(s: str):
@@ -213,13 +218,13 @@ func sendString(writer io.Writer, str string) error {
 
 func recvString(reader *bufio.Reader) (string, error) {
 	lengthBytes := make([]byte, 4)
-	_, err := reader.Read(lengthBytes)
+	_, err := io.ReadFull(reader, lengthBytes)
 	if err != nil {
 		return "", err
 	}
 	length := binary.BigEndian.Uint32(lengthBytes)
 	data := make([]byte, length)
-	_, err = reader.Read(data)
+	_, err = io.ReadFull(reader, data)
 	if err != nil {
 		return "", err
 	}
