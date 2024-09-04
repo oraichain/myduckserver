@@ -7,6 +7,12 @@ import (
 )
 
 func TestTranslate(t *testing.T) {
+	err := startTranslationService()
+	if err != nil {
+		t.Fatalf("Failed to start translation service: %v", err)
+	}
+	defer stopTranslationService()
+
 	// Define a slice of test cases
 	testCases := []struct {
 		name     string
@@ -35,7 +41,16 @@ func TestTranslate(t *testing.T) {
 			input:    "CREATE TABLE orders (order_id INT PRIMARY KEY, user_id INT, FOREIGN KEY (user_id) REFERENCES users(id))",
 			expected: "CREATE TABLE orders (order_id INT PRIMARY KEY, user_id INT, FOREIGN KEY (user_id) REFERENCES users (id))",
 		},
-		// Add more test cases as needed
+		{
+			name:     "SELECT with newlines",
+			input:    "SELECT '\n' FROM users WHERE id = 1\n",
+			expected: "SELECT '\n' FROM users WHERE id = 1",
+		},
+		{
+			name:     "multiple statements",
+			input:    "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY); \n SELECT * FROM users WHERE id = 1",
+			expected: "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY)",
+		},
 	}
 
 	// Loop over each test case

@@ -42,13 +42,6 @@ var (
 	dbFilePath    string
 )
 
-func checkDependencies() {
-	_, err := translateWithSQLGlot("SELECT 1")
-	if err != nil {
-		panic("Python and SQLGlot are required to run the server. Please install them and try again.")
-	}
-}
-
 func init() {
 	flag.StringVar(&address, "address", address, "The address to bind to.")
 	flag.IntVar(&port, "port", port, "The port to bind to.")
@@ -59,7 +52,12 @@ func main() {
 	flag.Parse()
 	dbFilePath = filepath.Join(dataDirectory, dbFileName)
 
-	checkDependencies()
+	// start SQL translate service
+	err := startTranslationService()
+	if err != nil {
+		panic(err)
+	}
+	defer stopTranslationService()
 
 	provider, err := meta.NewDBProvider(dataDirectory, dbFileName)
 	if err != nil {
