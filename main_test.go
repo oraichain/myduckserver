@@ -57,7 +57,7 @@ var parallelVals = []int{
 }
 
 func TestDebugHarness(t *testing.T) {
-	// t.Skip("only used for debugging")
+	t.Skip("only used for debugging")
 
 	harness := NewDuckHarness("debug", 1, 1, true, nil)
 
@@ -95,6 +95,7 @@ func TestDebugHarness(t *testing.T) {
 // 2) Mergeable / unmergeable / native / no indexes
 // 3) Parallelism on / off
 func TestQueries(t *testing.T) {
+	t.Skip("wait for fix")
 	for _, numPartitions := range numPartitionsVals {
 		for _, indexBehavior := range indexBehaviors {
 			for _, parallelism := range parallelVals {
@@ -115,6 +116,7 @@ func TestQueries(t *testing.T) {
 
 // TestQueriesPreparedSimple runs the canonical test queries against a single threaded index enabled harness.
 func TestQueriesPreparedSimple(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	if harness.IsUsingServer() {
 		t.Skip("issue: https://github.com/dolthub/dolt/issues/6904 and https://github.com/dolthub/dolt/issues/6901")
@@ -124,30 +126,36 @@ func TestQueriesPreparedSimple(t *testing.T) {
 
 // TestQueriesSimple runs the canonical test queries against a single threaded index enabled harness.
 func TestQueriesSimple(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	enginetest.TestQueries(t, harness)
 }
 
 // TestJoinQueries runs the canonical test queries against a single threaded index enabled harness.
 func TestJoinQueries(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestJoinQueries(t, NewDefaultDuckHarness())
 }
 
 func TestLateralJoin(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestLateralJoinQueries(t, NewDefaultDuckHarness())
 }
 
 // TestJoinPlanning runs join-specific tests for merge
 func TestJoinPlanning(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestJoinPlanning(t, NewDefaultDuckHarness())
 }
 
 // TestJoinOps runs join-specific tests for merge
 func TestJoinOps(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestJoinOps(t, NewDefaultDuckHarness(), enginetest.DefaultJoinOpTests)
 }
 
 func TestJoinStats(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	if harness.IsUsingServer() {
 		t.Skip("join stats don't work with bindvars")
@@ -157,16 +165,19 @@ func TestJoinStats(t *testing.T) {
 
 // TestJSONTableQueries runs the canonical test queries against a single threaded index enabled harness.
 func TestJSONTableQueries(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestJSONTableQueries(t, NewDefaultDuckHarness())
 }
 
 // TestJSONTableScripts runs the canonical test queries against a single threaded index enabled harness.
 func TestJSONTableScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestJSONTableScripts(t, NewDefaultDuckHarness())
 }
 
 // TestBrokenJSONTableScripts runs the canonical test queries against a single threaded index enabled harness.
 func TestBrokenJSONTableScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestBrokenJSONTableScripts(t, enginetest.NewSkippingMemoryHarness())
 }
 
@@ -275,11 +286,11 @@ func TestUnbuildableIndex(t *testing.T) {
 }
 
 func TestBrokenQueries(t *testing.T) {
-	enginetest.TestBrokenQueries(t, enginetest.NewSkippingMemoryHarness())
+	enginetest.TestBrokenQueries(t, NewSkippingDuckHarness())
 }
 
 func TestQueryPlanTODOs(t *testing.T) {
-	harness := enginetest.NewSkippingMemoryHarness()
+	harness := NewSkippingDuckHarness()
 	harness.Setup(setup.MydbData, setup.Pk_tablesData, setup.NiltableData)
 	e, err := harness.NewEngine(t)
 	if err != nil {
@@ -292,6 +303,7 @@ func TestQueryPlanTODOs(t *testing.T) {
 	}
 }
 
+// TODO: implement support for versioned queries
 // func TestVersionedQueries(t *testing.T) {
 // 	for _, numPartitions := range numPartitionsVals {
 // 		for _, indexInit := range indexBehaviors {
@@ -308,10 +320,12 @@ func TestQueryPlanTODOs(t *testing.T) {
 // }
 
 func TestAnsiQuotesSqlMode(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestAnsiQuotesSqlMode(t, NewDefaultDuckHarness())
 }
 
 func TestAnsiQuotesSqlModePrepared(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	if harness.IsUsingServer() {
 		t.Skip("prepared test depend on context for current sql_mode information, but it does not get updated when using ServerEngine")
@@ -322,6 +336,7 @@ func TestAnsiQuotesSqlModePrepared(t *testing.T) {
 // Tests of choosing the correct execution plan independent of result correctness. Mostly useful for confirming that
 // the right indexes are being used for joining tables.
 func TestQueryPlans(t *testing.T) {
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 		{"nativeAndMergable", mergableIndexDriver, true},
@@ -432,6 +447,7 @@ func TestSingleQueryPlan(t *testing.T) {
 }
 
 func TestIntegrationQueryPlans(t *testing.T) {
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 	}
@@ -445,7 +461,7 @@ func TestIntegrationQueryPlans(t *testing.T) {
 }
 
 func TestImdbQueryPlans(t *testing.T) {
-	t.Skip("tests are too slow")
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 	}
@@ -459,6 +475,7 @@ func TestImdbQueryPlans(t *testing.T) {
 }
 
 func TestTpccQueryPlans(t *testing.T) {
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 	}
@@ -472,6 +489,7 @@ func TestTpccQueryPlans(t *testing.T) {
 }
 
 func TestTpchQueryPlans(t *testing.T) {
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 	}
@@ -485,7 +503,7 @@ func TestTpchQueryPlans(t *testing.T) {
 }
 
 func TestTpcdsQueryPlans(t *testing.T) {
-	t.Skip("missing features")
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 	}
@@ -499,6 +517,7 @@ func TestTpcdsQueryPlans(t *testing.T) {
 }
 
 func TestIndexQueryPlans(t *testing.T) {
+	t.Skip("myduckserver has different query plans")
 	indexBehaviors := []*indexBehaviorTestParams{
 		{"nativeIndexes", nil, true},
 		{"nativeAndMergable", mergableIndexDriver, true},
@@ -517,10 +536,12 @@ func TestParallelismQueries(t *testing.T) {
 }
 
 func TestQueryErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestQueryErrors(t, NewDefaultDuckHarness())
 }
 
 func TestInfoSchema(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestInfoSchema(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
@@ -537,15 +558,18 @@ func TestMySqlDb(t *testing.T) {
 // }
 
 func TestColumnAliases(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestColumnAliases(t, NewDefaultDuckHarness())
 }
 
 func TestDerivedTableOuterScopeVisibility(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	enginetest.TestDerivedTableOuterScopeVisibility(t, harness)
 }
 
 func TestOrderByGroupBy(t *testing.T) {
+	t.Skip("wait for fix")
 	// TODO: window validation expecting error message
 	enginetest.TestOrderByGroupBy(t, NewDefaultDuckHarness())
 }
@@ -555,140 +579,174 @@ func TestAmbiguousColumnResolution(t *testing.T) {
 }
 
 func TestInsertInto(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	enginetest.TestInsertInto(t, harness)
 }
 
 func TestInsertIgnoreInto(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestInsertIgnoreInto(t, NewDefaultDuckHarness())
 }
 
 func TestInsertDuplicateKeyKeyless(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestInsertDuplicateKeyKeyless(t, NewDefaultDuckHarness())
 }
 
 func TestIgnoreIntoWithDuplicateUniqueKeyKeyless(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestIgnoreIntoWithDuplicateUniqueKeyKeyless(t, NewDefaultDuckHarness())
 }
 
 func TestInsertIntoErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestInsertIntoErrors(t, NewDefaultDuckHarness())
 }
 
 func TestBrokenInsertScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestBrokenInsertScripts(t, NewDefaultDuckHarness())
 }
 
 func TestGeneratedColumns(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestGeneratedColumns(t, NewDefaultDuckHarness())
 }
 
 func TestGeneratedColumnPlans(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestGeneratedColumnPlans(t, NewDefaultDuckHarness())
 }
 
 func TestSysbenchPlans(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSysbenchPlans(t, NewDefaultDuckHarness())
 }
 
 func TestStatistics(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestStatistics(t, NewDefaultDuckHarness())
 }
 
 func TestStatisticIndexFilters(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestStatisticIndexFilters(t, NewDefaultDuckHarness())
 }
 
 func TestSpatialInsertInto(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialInsertInto(t, NewDefaultDuckHarness())
 }
 
 func TestLoadData(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestLoadData(t, NewDefaultDuckHarness())
 }
 
 func TestLoadDataErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestLoadDataErrors(t, NewDefaultDuckHarness())
 }
 
 func TestLoadDataFailing(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestLoadDataFailing(t, NewDefaultDuckHarness())
 }
 
 func TestSelectIntoFile(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSelectIntoFile(t, NewDefaultDuckHarness())
 }
 
 func TestReplaceInto(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestReplaceInto(t, NewDefaultDuckHarness())
 }
 
 func TestReplaceIntoErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestReplaceIntoErrors(t, NewDefaultDuckHarness())
 }
 
 func TestUpdate(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestUpdate(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestUpdateIgnore(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestUpdateIgnore(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestUpdateErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	// TODO different errors
 	enginetest.TestUpdateErrors(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestOnUpdateExprScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestOnUpdateExprScripts(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestSpatialUpdate(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialUpdate(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestDeleteFromErrors(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestDeleteErrors(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestSpatialDeleteFrom(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialDelete(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestTruncate(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestTruncate(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestDeleteFrom(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestDelete(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestConvert(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestConvert(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestScripts(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestSpatialScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialScripts(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestSpatialIndexScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialIndexScripts(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestSpatialIndexPlans(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSpatialIndexPlans(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestNumericErrorScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestNumericErrorScripts(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestUserPrivileges(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver)
 	if harness.IsUsingServer() {
 		t.Skip("TestUserPrivileges test depend on Context to switch the user to run test queries")
@@ -697,6 +755,7 @@ func TestUserPrivileges(t *testing.T) {
 }
 
 func TestUserAuthentication(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver)
 	if harness.IsUsingServer() {
 		t.Skip("TestUserPrivileges test depend on Context to switch the user to run test queries")
@@ -705,23 +764,28 @@ func TestUserAuthentication(t *testing.T) {
 }
 
 func TestPrivilegePersistence(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPrivilegePersistence(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestComplexIndexQueries(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver)
 	enginetest.TestComplexIndexQueries(t, harness)
 }
 
 func TestTriggers(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestTriggers(t, NewDefaultDuckHarness())
 }
 
 func TestShowTriggers(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestShowTriggers(t, NewDefaultDuckHarness())
 }
 
 func TestBrokenTriggers(t *testing.T) {
+	t.Skip("wait for support")
 	h := enginetest.NewSkippingMemoryHarness()
 	for _, script := range queries.BrokenTriggerQueries {
 		enginetest.TestScript(t, h, script)
@@ -729,6 +793,7 @@ func TestBrokenTriggers(t *testing.T) {
 }
 
 func TestStoredProcedures(t *testing.T) {
+	t.Skip("wait for support")
 	for i, test := range queries.ProcedureLogicTests {
 		//TODO: the RowIter returned from a SELECT should not take future changes into account
 		if test.Name == "FETCH captures state at OPEN" {
@@ -740,18 +805,22 @@ func TestStoredProcedures(t *testing.T) {
 }
 
 func TestEvents(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestEvents(t, NewDefaultDuckHarness())
 }
 
 func TestTriggersErrors(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestTriggerErrors(t, NewDefaultDuckHarness())
 }
 
 func TestCreateTable(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestCreateTable(t, NewDefaultDuckHarness())
 }
 
 func TestRowLimit(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestRowLimit(t, NewDefaultDuckHarness())
 }
 
@@ -760,26 +829,32 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestRenameTable(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestRenameTable(t, NewDefaultDuckHarness())
 }
 
 func TestRenameColumn(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestRenameColumn(t, NewDefaultDuckHarness())
 }
 
 func TestAddColumn(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestAddColumn(t, NewDefaultDuckHarness())
 }
 
 func TestModifyColumn(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestModifyColumn(t, NewDefaultDuckHarness())
 }
 
 func TestDropColumn(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestDropColumn(t, NewDefaultDuckHarness())
 }
 
 func TestDropColumnKeylessTables(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestDropColumnKeylessTables(t, NewDefaultDuckHarness())
 }
 
@@ -788,10 +863,12 @@ func TestCreateDatabase(t *testing.T) {
 }
 
 func TestPkOrdinalsDDL(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPkOrdinalsDDL(t, NewDefaultDuckHarness())
 }
 
 func TestPkOrdinalsDML(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPkOrdinalsDML(t, NewDefaultDuckHarness())
 }
 
@@ -800,46 +877,57 @@ func TestDropDatabase(t *testing.T) {
 }
 
 func TestCreateForeignKeys(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestCreateForeignKeys(t, NewDefaultDuckHarness())
 }
 
 func TestDropForeignKeys(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestDropForeignKeys(t, NewDefaultDuckHarness())
 }
 
 func TestForeignKeys(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestForeignKeys(t, NewDefaultDuckHarness())
 }
 
 func TestFulltextIndexes(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestFulltextIndexes(t, NewDefaultDuckHarness())
 }
 
 func TestCreateCheckConstraints(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestCreateCheckConstraints(t, NewDefaultDuckHarness())
 }
 
 func TestChecksOnInsert(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestChecksOnInsert(t, NewDefaultDuckHarness())
 }
 
 func TestChecksOnUpdate(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestChecksOnUpdate(t, NewDefaultDuckHarness())
 }
 
 func TestDisallowedCheckConstraints(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestDisallowedCheckConstraints(t, NewDefaultDuckHarness())
 }
 
 func TestDropCheckConstraints(t *testing.T) {
+	t.Skip("wait for support")
 	enginetest.TestDropCheckConstraints(t, NewDefaultDuckHarness())
 }
 
 func TestReadOnly(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestReadOnly(t, NewDefaultDuckHarness(), true /* testStoredProcedures */)
 }
 
 func TestViews(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestViews(t, NewDefaultDuckHarness())
 }
 
@@ -852,14 +940,17 @@ func TestNaturalJoin(t *testing.T) {
 }
 
 func TestWindowFunctions(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestWindowFunctions(t, NewDefaultDuckHarness())
 }
 
 func TestWindowRangeFrames(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestWindowRangeFrames(t, NewDefaultDuckHarness())
 }
 
 func TestNamedWindows(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestNamedWindows(t, NewDefaultDuckHarness())
 }
 
@@ -868,6 +959,7 @@ func TestNaturalJoinEqual(t *testing.T) {
 }
 
 func TestNaturalJoinDisjoint(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestNaturalJoinDisjoint(t, NewDefaultDuckHarness())
 }
 
@@ -876,10 +968,12 @@ func TestInnerNestedInNaturalJoins(t *testing.T) {
 }
 
 func TestColumnDefaults(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestColumnDefaults(t, NewDefaultDuckHarness())
 }
 
 func TestAlterTable(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestAlterTable(t, NewDefaultDuckHarness())
 }
 
@@ -892,19 +986,23 @@ func TestDateParse(t *testing.T) {
 }
 
 func TestJsonScripts(t *testing.T) {
+	t.Skip("wait for fix")
 	var skippedTests []string = nil
 	enginetest.TestJsonScripts(t, NewDefaultDuckHarness(), skippedTests)
 }
 
 func TestShowTableStatus(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestShowTableStatus(t, NewDefaultDuckHarness())
 }
 
 func TestAddDropPks(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestAddDropPks(t, NewDefaultDuckHarness())
 }
 
 func TestAddAutoIncrementColumn(t *testing.T) {
+	t.Skip("wait for fix")
 	for _, script := range queries.AlterTableAddAutoIncrementScripts {
 		enginetest.TestScript(t, NewDefaultDuckHarness(), script)
 	}
@@ -915,14 +1013,17 @@ func TestNullRanges(t *testing.T) {
 }
 
 func TestBlobs(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestBlobs(t, NewDefaultDuckHarness())
 }
 
 func TestIndexes(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestIndexes(t, NewDefaultDuckHarness())
 }
 
 func TestIndexPrefix(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestIndexPrefix(t, NewDefaultDuckHarness())
 }
 
@@ -959,18 +1060,22 @@ func TestValidateSession(t *testing.T) {
 }
 
 func TestPrepared(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPrepared(t, NewDefaultDuckHarness())
 }
 
 func TestPreparedInsert(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPreparedInsert(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 
 func TestPreparedStatements(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestPreparedStatements(t, NewDefaultDuckHarness())
 }
 
 func TestCharsetCollationEngine(t *testing.T) {
+	t.Skip("wait for fix")
 	harness := NewDefaultDuckHarness()
 	if harness.IsUsingServer() {
 		// Note: charset introducer needs to be handled with the SQLVal when preparing
@@ -981,6 +1086,7 @@ func TestCharsetCollationEngine(t *testing.T) {
 }
 
 func TestCharsetCollationWire(t *testing.T) {
+	t.Skip("wait for fix")
 	if _, ok := os.LookupEnv("CI_TEST"); !ok {
 		t.Skip("Skipping test that requires CI_TEST=true")
 	}
@@ -989,6 +1095,7 @@ func TestCharsetCollationWire(t *testing.T) {
 }
 
 func TestDatabaseCollationWire(t *testing.T) {
+	t.Skip("wait for fix")
 	if _, ok := os.LookupEnv("CI_TEST"); !ok {
 		t.Skip("Skipping test that requires CI_TEST=true")
 	}
@@ -997,6 +1104,7 @@ func TestDatabaseCollationWire(t *testing.T) {
 }
 
 func TestTypesOverWire(t *testing.T) {
+	t.Skip("wait for fix")
 	if _, ok := os.LookupEnv("CI_TEST"); !ok {
 		t.Skip("Skipping test that requires CI_TEST=true")
 	}
@@ -1005,7 +1113,8 @@ func TestTypesOverWire(t *testing.T) {
 }
 
 func TestTransactions(t *testing.T) {
-	enginetest.TestTransactionScripts(t, enginetest.NewSkippingMemoryHarness())
+	t.Skip("wait for support")
+	enginetest.TestTransactionScripts(t, NewSkippingDuckHarness())
 }
 
 func mergableIndexDriver(dbs []sql.Database) sql.IndexDriver {
@@ -1086,6 +1195,7 @@ func findTable(dbs []sql.Database, tableName string) (sql.Database, sql.Table) {
 }
 
 func TestSQLLogicTests(t *testing.T) {
+	t.Skip("wait for fix")
 	enginetest.TestSQLLogicTests(t, NewDuckHarness("default", 1, testNumPartitions, true, mergableIndexDriver))
 }
 

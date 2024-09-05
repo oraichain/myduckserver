@@ -41,6 +41,9 @@ jobs:
 
     - name: Build
       run: go build -v
+      
+    - name: Test Query Engine
+      run: go test -v -cover --timeout 120s .
 
     - name: Test Binlog Replication
       run: go test -v -p 1 --timeout 360s ./binlogreplication

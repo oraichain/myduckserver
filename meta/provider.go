@@ -149,7 +149,7 @@ func (prov *DbProvider) HasDatabase(ctx *sql.Context, name string) bool {
 }
 
 func hasDatabase(engine *stdsql.DB, dstName string, name string) (bool, error) {
-	rows, err := engine.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ? AND schema_name = ?", dstName, name)
+	rows, err := engine.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ? AND schema_name = ?", dstName, strings.ToLower(name))
 	if err != nil {
 		return false, ErrDuckDB.New(err)
 	}

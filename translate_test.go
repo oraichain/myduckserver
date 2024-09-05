@@ -7,11 +7,6 @@ import (
 )
 
 func TestTranslate(t *testing.T) {
-	err := startTranslationService()
-	if err != nil {
-		t.Fatalf("Failed to start translation service: %v", err)
-	}
-	defer stopTranslationService()
 
 	// Define a slice of test cases
 	testCases := []struct {

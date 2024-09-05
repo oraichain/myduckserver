@@ -48,16 +48,18 @@ func init() {
 	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
 }
 
+func ensureSQLTranslate() {
+	_, err := translateWithSQLGlot("SELECT 1")
+	if err != nil {
+		panic(err)
+	}
+}
+
 func main() {
 	flag.Parse()
 	dbFilePath = filepath.Join(dataDirectory, dbFileName)
 
-	// start SQL translate service
-	err := startTranslationService()
-	if err != nil {
-		panic(err)
-	}
-	defer stopTranslationService()
+	ensureSQLTranslate()
 
 	provider, err := meta.NewDBProvider(dataDirectory, dbFileName)
 	if err != nil {

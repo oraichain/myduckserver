@@ -22,6 +22,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"gopkg.in/src-d/go-errors.v1"
 
@@ -59,7 +60,10 @@ type translateService struct {
 	stderrBuf    *bytes.Buffer
 }
 
-var translationSvc *translateService
+var (
+	translationSvcOnce sync.Once
+	translationSvc     *translateService
+)
 
 func newTranslateService() (*translateService, error) {
 	pythonPath, err := getPythonPath()
@@ -150,9 +154,11 @@ while True:
 	testSQL := "SELECT 1"
 	translatedSQL, err := svc.translate(testSQL)
 	if err != nil {
+		svc.cleanup()
 		return nil, fmt.Errorf("failed to test translation service: %v", err)
 	}
 	if translatedSQL != "SELECT 1" {
+		svc.cleanup()
 		return nil, fmt.Errorf("unexpected translation result: %s", translatedSQL)
 	}
 
@@ -238,19 +244,6 @@ func (svc *translateService) cleanup() {
 	close(svc.responseChan)
 }
 
-func startTranslationService() error {
-	svc, err := newTranslateService()
-	if err != nil {
-		return fmt.Errorf("failed to initialize translation service: %v", err)
-	}
-	translationSvc = svc
-	return nil
-}
-
-func stopTranslationService() {
-	translationSvc.cleanup()
-}
-
 func translate(node sql.Node, sql string) (string, error) {
 	switch node.(type) {
 	case *plan.CreateTable,
@@ -273,9 +266,13 @@ func translateBuiltIn(sql string) (string, error) {
 }
 
 func translateWithSQLGlot(sql string) (string, error) {
-	if translationSvc == nil {
-		return "", fmt.Errorf("translation service is not initialized")
-	}
+	translationSvcOnce.Do(func() {
+		svc, err := newTranslateService()
+		if err != nil {
+			panic(fmt.Errorf("failed to initialize translation service: %v", err))
+		}
+		translationSvc = svc
+	})
 
 	return translationSvc.translate(sql)
 }
