@@ -78,7 +78,7 @@ func (d *Database) tablesInsensitive() (map[string]sql.Table, error) {
 		if err := rows.Scan(&tblName, &comment); err != nil {
 			return nil, ErrDuckDB.New(err)
 		}
-		tbls[strings.ToLower(tblName)] = NewTable(tblName, d).WithComment(DecodeComment(comment.String))
+		tbls[strings.ToLower(tblName)] = NewTable(tblName, d).WithComment(DecodeComment[any](comment.String))
 	}
 	return tbls, nil
 }
@@ -113,10 +113,10 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 
 		columns = append(columns, colDef)
 
-		if col.Comment != "" || typ.myType != "" {
+		if col.Comment != "" || typ.mysql.Name != "" {
 			columnCommentSQLs = append(columnCommentSQLs,
-				fmt.Sprintf(`COMMENT ON COLUMN %s IS %s`, FullColumnName(d.catalogName, d.name, name, col.Name),
-					NewCommentWithMeta(col.Comment, typ.myType).Encode()))
+				fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(d.catalogName, d.name, name, col.Name),
+					NewCommentWithMeta[MySQLType](col.Comment, typ.mysql).Encode()))
 		}
 	}
 
@@ -137,7 +137,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 
 	// Add comment to the table
 	if comment != "" {
-		sqlsBuild.WriteString(fmt.Sprintf("; COMMENT ON TABLE %s IS %s", FullTableName(d.catalogName, d.name, name), NewComment(comment).Encode()))
+		sqlsBuild.WriteString(fmt.Sprintf("; COMMENT ON TABLE %s IS '%s'", FullTableName(d.catalogName, d.name, name), NewComment[any](comment).Encode()))
 	}
 
 	// Add column comments

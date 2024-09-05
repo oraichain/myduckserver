@@ -15,7 +15,7 @@ type Table struct {
 	mu      *sync.RWMutex
 	name    string
 	db      *Database
-	comment *Comment // save the comment to avoid querying duckdb everytime
+	comment *Comment[any] // save the comment to avoid querying duckdb everytime
 }
 
 var _ sql.Table = (*Table)(nil)
@@ -35,7 +35,7 @@ func NewTable(name string, db *Database) *Table {
 		db:   db}
 }
 
-func (t *Table) WithComment(comment *Comment) *Table {
+func (t *Table) WithComment(comment *Comment[any]) *Table {
 	t.comment = comment
 	return t
 }
@@ -95,11 +95,11 @@ func (t *Table) schema() sql.Schema {
 			defaultValue = sql.NewUnresolvedColumnDefaultValue(columnDefault.String)
 		}
 
-		decodedComment := DecodeComment(comment.String)
+		decodedComment := DecodeComment[MySQLType](comment.String)
 
 		column := &sql.Column{
 			Name:           columnName,
-			Type:           mysqlDataType(newDuckType(dataType, decodedComment.Meta), uint8(numericPrecision.Int32), uint8(numericScale.Int32)),
+			Type:           mysqlDataType(AnnotatedDuckType{dataType, decodedComment.Meta}, uint8(numericPrecision.Int32), uint8(numericScale.Int32)),
 			Nullable:       isNullable,
 			Source:         t.name,
 			DatabaseSource: t.db.name,
@@ -183,8 +183,8 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 	}
 
 	// add comment
-	comment := NewCommentWithMeta(column.Comment, typ.myType)
-	sql += fmt.Sprintf(`; COMMENT ON COLUMN %s IS %s`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode())
+	comment := NewCommentWithMeta(column.Comment, typ.mysql)
+	sql += fmt.Sprintf(`; COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode())
 
 	_, err = t.db.storage.Exec(sql)
 	if err != nil {
@@ -241,8 +241,8 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	}
 
 	// alter comment
-	comment := NewCommentWithMeta(column.Comment, typ.myType)
-	sqls = append(sqls, fmt.Sprintf(`COMMENT ON COLUMN %s IS %s`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode()))
+	comment := NewCommentWithMeta[MySQLType](column.Comment, typ.mysql)
+	sqls = append(sqls, fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalogName, t.db.name, t.name, column.Name), comment.Encode()))
 
 	joinedSQL := strings.Join(sqls, "; ")
 	_, err = t.db.storage.Exec(joinedSQL)
@@ -309,9 +309,9 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 
 	// Add the index comment if provided
 	if indexDef.Comment != "" {
-		sqlsBuilder.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS %s",
+		sqlsBuilder.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS '%s'",
 			FullIndexName(t.db.catalogName, t.db.name, EncodeIndexName(t.name, indexDef.Name)),
-			NewComment(indexDef.Comment).Encode()))
+			NewComment[any](indexDef.Comment).Encode()))
 	}
 
 	// Execute the SQL statement to create the index
@@ -377,7 +377,7 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 
 		_, indexName := DecodeIndexName(encodedIndexName)
 
-		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, DecodeComment(comment.String)))
+		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, DecodeComment[any](comment.String)))
 	}
 
 	if err := rows.Err(); err != nil {

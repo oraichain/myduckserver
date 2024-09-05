@@ -2,7 +2,6 @@ package meta
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -14,36 +13,65 @@ import (
 // and implement the interface{} type for each corresponding MySQL type.
 // The current large mapping function is error-prone and difficult to maintain.
 
-type duckType struct {
-	name   string
-	myType string // myType is only used for some types to specify the original type in the mysqlType string, e.g. "VARCHAR(255)", "DATETIME", "YEAR"
+type AnnotatedDuckType struct {
+	name  string
+	mysql MySQLType
 }
 
-func newDT(name string) duckType {
-	return newDuckType(name, "")
+type MySQLType struct {
+	Name      string
+	Length    uint32   `json:",omitempty"`
+	Precision uint8    `json:",omitempty"`
+	Scale     uint8    `json:",omitempty"`
+	Unsigned  bool     `json:",omitempty"`
+	Display   uint8    `json:",omitempty"` // Display width for integer types
+	Collation uint16   `json:",omitempty"` // For string types
+	Values    []string `json:",omitempty"` // For ENUM and SET
 }
 
-func newDuckType(name, myType string) duckType {
-	return duckType{name: name, myType: myType}
+func newCommonType(name string) AnnotatedDuckType {
+	return AnnotatedDuckType{name, MySQLType{Name: name}}
 }
 
-func newDuckTypeLength(name, myType string, length int64) duckType {
-	return newDuckType(name, fmt.Sprintf("%s(%d)", myType, length))
+func newSimpleType(duckName, mysqlName string) AnnotatedDuckType {
+	return AnnotatedDuckType{duckName, MySQLType{Name: mysqlName}}
 }
 
-func newNumberType(name string, displayWidth int) duckType {
-	return newDuckTypeLength(name, name, int64(displayWidth))
+func newStringType(duckName, mysqlName string, typ sql.StringType) AnnotatedDuckType {
+	return AnnotatedDuckType{
+		duckName,
+		MySQLType{Name: mysqlName, Length: uint32(typ.Length()), Collation: uint16(typ.Collation())},
+	}
 }
 
-func newMediumIntType(displayWidth int) duckType {
-	return newDuckTypeLength("INTEGER", "MEDIUMINT", int64(displayWidth))
+func newPrecisionType(duckName, mysqlName string, precision uint8) AnnotatedDuckType {
+	return AnnotatedDuckType{duckName, MySQLType{Name: mysqlName, Precision: precision}}
 }
 
-func newUnsignedMediumIntType(displayWidth int) duckType {
-	return newDuckTypeLength("UINTEGER", "UMEDIUMINT", int64(displayWidth))
+func newDecimalType(precision, scale uint8) AnnotatedDuckType {
+	return AnnotatedDuckType{
+		fmt.Sprintf("DECIMAL(%d, %d)", precision, scale),
+		MySQLType{Name: "DECIMAL", Precision: precision, Scale: scale},
+	}
 }
 
-func newDateTimeType(myTypeName string, precision int) duckType {
+func newNumberType(name string, displayWidth int) AnnotatedDuckType {
+	return AnnotatedDuckType{name, MySQLType{Name: name, Display: uint8(displayWidth)}}
+}
+
+func newUnsignedNumberType(name string, displayWidth int) AnnotatedDuckType {
+	return AnnotatedDuckType{name, MySQLType{Name: name, Display: uint8(displayWidth), Unsigned: true}}
+}
+
+func newMediumIntType(displayWidth int) AnnotatedDuckType {
+	return AnnotatedDuckType{"INTEGER", MySQLType{Name: "MEDIUMINT", Display: uint8(displayWidth)}}
+}
+
+func newUnsignedMediumIntType(displayWidth int) AnnotatedDuckType {
+	return AnnotatedDuckType{"UINTEGER", MySQLType{Name: "MEDIUMINT", Display: uint8(displayWidth), Unsigned: true}}
+}
+
+func newDateTimeType(mysqlName string, precision int) AnnotatedDuckType {
 	// precision is [0, 6], round up to 3
 
 	name := "TIMESTAMP"
@@ -55,32 +83,18 @@ func newDateTimeType(myTypeName string, precision int) duckType {
 		name = "TIMESTAMP" // us
 	}
 
-	return newDuckTypeLength(name, myTypeName, int64(precision))
+	return AnnotatedDuckType{name, MySQLType{Name: mysqlName, Precision: uint8(precision)}}
 }
 
-func (d duckType) decodeMyType() (string, int64) {
-	if d.myType == "" {
-		return "", 0
-	}
-	parts := strings.Split(d.myType, "(")
-	if len(parts) == 1 {
-		// no parameters
-		return d.myType, 0
-	}
-	if len(parts) != 2 {
-		panic(fmt.Sprintf("invalid MySQL Type string: %s", d.myType))
-	}
-	lengthStr := strings.TrimSuffix(parts[1], ")")
-	length, err := strconv.ParseInt(lengthStr, 10, 64)
-	if err != nil {
-		panic(fmt.Sprintf("invalid MySQL Type string: %s, error: %v", d.myType, err))
-	}
-	return parts[0], length
+func newEnumType(typ sql.EnumType) AnnotatedDuckType {
+	// TODO: `ENUM` allows `,` and `'` in the values. We need to escape `'`.
+	typeString := `ENUM('` + strings.Join(typ.Values(), `', '`) + `')`
+	return AnnotatedDuckType{typeString, MySQLType{Name: "ENUM", Values: typ.Values(), Collation: uint16(typ.Collation())}}
 }
 
 const DuckDBDecimalTypeMaxPrecision = 38
 
-func duckdbDataType(mysqlType sql.Type) (duckType, error) {
+func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
 
 	// ugly ? no, AI helps us
 	switch mysqlType.Type() {
@@ -105,19 +119,19 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 	case sqltypes.Uint64:
 		return newNumberType("UBIGINT", mysqlType.(sql.NumberType).DisplayWidth()), nil
 	case sqltypes.Float32:
-		return newDT("FLOAT"), nil
+		return newCommonType("FLOAT"), nil
 	case sqltypes.Float64:
-		return newDT("DOUBLE"), nil
+		return newCommonType("DOUBLE"), nil
 	case sqltypes.Timestamp:
 		return newDateTimeType("TIMESTAMP", mysqlType.(sql.DatetimeType).Precision()), nil // TODO: check if this is correct
 	case sqltypes.Date:
-		return newDT("DATE"), nil
+		return newCommonType("DATE"), nil
 	case sqltypes.Time:
-		return newDT("TIME"), nil
+		return newCommonType("TIME"), nil
 	case sqltypes.Datetime:
 		return newDateTimeType("DATETIME", mysqlType.(sql.DatetimeType).Precision()), nil
 	case sqltypes.Year:
-		return newDuckType("SMALLINT", "YEAR"), nil
+		return newSimpleType("SMALLINT", "YEAR"), nil
 	case sqltypes.Decimal:
 		decimal := mysqlType.(sql.DecimalType)
 		prec := decimal.Precision()
@@ -130,72 +144,70 @@ func duckdbDataType(mysqlType sql.Type) (duckType, error) {
 				scale = prec
 			}
 		}
-		return newDT(fmt.Sprintf("DECIMAL(%d, %d)", prec, scale)), nil
+		return newDecimalType(prec, scale), nil
 	// the logic is based on https://github.com/dolthub/go-mysql-server/blob/ed8de8d3a4e6a3c3f76788821fd3890aca4806bc/sql/types/strings.go#L570
 	case sqltypes.Text:
-		return newDuckTypeLength("VARCHAR", "TEXT", mysqlType.(sql.StringType).MaxByteLength()), nil
+		return newStringType("VARCHAR", "TEXT", mysqlType.(sql.StringType)), nil
 	case sqltypes.Blob:
-		return newDuckTypeLength("BLOB", "BLOB", mysqlType.(sql.StringType).MaxByteLength()), nil
+		return newStringType("BLOB", "BLOB", mysqlType.(sql.StringType)), nil
 	case sqltypes.VarChar:
-		return newDuckTypeLength("VARCHAR", "VARCHAR", mysqlType.(sql.StringType).MaxCharacterLength()), nil
+		return newStringType("VARCHAR", "VARCHAR", mysqlType.(sql.StringType)), nil
 	case sqltypes.VarBinary:
-		return newDuckTypeLength("BLOB", "VARBINARY", mysqlType.(sql.StringType).MaxCharacterLength()), nil
+		return newStringType("BLOB", "VARBINARY", mysqlType.(sql.StringType)), nil
 	case sqltypes.Char:
-		return newDuckTypeLength("VARCHAR", "CHAR", mysqlType.(sql.StringType).MaxCharacterLength()), nil
+		return newStringType("VARCHAR", "CHAR", mysqlType.(sql.StringType)), nil
 	case sqltypes.Binary:
-		return newDuckTypeLength("BLOB", "BINARY", mysqlType.(sql.StringType).MaxCharacterLength()), nil
+		return newStringType("BLOB", "BINARY", mysqlType.(sql.StringType)), nil
 	case sqltypes.Bit:
-		return newDuckTypeLength("BIT", "BIT", int64(mysqlType.(types.BitType).NumberOfBits())), nil
+		return newPrecisionType("BIT", "BIT", mysqlType.(types.BitType).NumberOfBits()), nil
 	case sqltypes.TypeJSON:
-		return newDT("JSON"), nil // TODO: install json extension in DuckDB
-	case sqltypes.Enum, sqltypes.Set, sqltypes.Geometry, sqltypes.Expression:
-		return newDT(""), fmt.Errorf("unsupported MySQL type: %s", mysqlType.String())
+		return newCommonType("JSON"), nil
+	case sqltypes.Enum:
+		return newEnumType(mysqlType.(types.EnumType)), nil
+	case sqltypes.Set, sqltypes.Geometry, sqltypes.Expression:
+		return newCommonType(""), fmt.Errorf("unsupported MySQL type: %s", mysqlType.String())
 	default:
 		panic(fmt.Sprintf("encountered unknown MySQL type(%v). This is likely a bug - please check the duckdbDataType function for missing type mappings", mysqlType.Type()))
 	}
 }
 
-func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uint8) sql.Type {
+func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericScale uint8) sql.Type {
 	// TODO: The current type mappings are not lossless. We need to store the original type in the column comments.
-	duckdbTypeStr := strings.TrimSpace(strings.ToUpper(duckdbType.name))
+	duckName := strings.TrimSpace(strings.ToUpper(duckType.name))
 
-	if strings.HasPrefix(duckdbTypeStr, "DECIMAL") {
-		duckdbTypeStr = "DECIMAL"
+	if strings.HasPrefix(duckName, "DECIMAL") {
+		duckName = "DECIMAL"
+	} else if strings.HasPrefix(duckName, "ENUM") {
+		duckName = "ENUM"
 	}
 
-	myTypeName, length := duckdbType.decodeMyType()
+	mysqlName := duckType.mysql.Name
 
 	// process integer types, they all have displayWidth
 	intBaseType := sqltypes.Null
-	switch duckdbTypeStr {
+	switch duckName {
 	case "TINYINT":
 		intBaseType = sqltypes.Int8
 	case "UTINYINT":
 		intBaseType = sqltypes.Uint8
 	case "SMALLINT":
-		{
-			if myTypeName == "YEAR" {
-				return types.Year
-			}
-			intBaseType = sqltypes.Int16
+		if mysqlName == "YEAR" {
+			return types.Year
 		}
+		intBaseType = sqltypes.Int16
 	case "USMALLINT":
 		intBaseType = sqltypes.Uint16
 	case "INTEGER":
-		{
-			if myTypeName == "MEDIUMINT" {
-				intBaseType = sqltypes.Int24
-			} else {
-				intBaseType = sqltypes.Int32
-			}
+		if mysqlName == "MEDIUMINT" {
+			intBaseType = sqltypes.Int24
+		} else {
+			intBaseType = sqltypes.Int32
 		}
 	case "UINTEGER":
-		{
-			if myTypeName == "UMEDIUMINT" {
-				intBaseType = sqltypes.Uint24
-			} else {
-				intBaseType = sqltypes.Uint32
-			}
+		if mysqlName == "MEDIUMINT" {
+			intBaseType = sqltypes.Uint24
+		} else {
+			intBaseType = sqltypes.Uint32
 		}
 	case "BIGINT":
 		intBaseType = sqltypes.Int64
@@ -204,83 +216,80 @@ func mysqlDataType(duckdbType duckType, numericPrecision uint8, numericScale uin
 	}
 
 	if intBaseType != sqltypes.Null {
-		return types.MustCreateNumberTypeWithDisplayWidth(intBaseType, int(length))
+		return types.MustCreateNumberTypeWithDisplayWidth(intBaseType, int(duckType.mysql.Display))
 	}
 
-	switch duckdbTypeStr {
+	length := int64(duckType.mysql.Length)
+	precision := int(duckType.mysql.Precision)
+	collation := sql.CollationID(duckType.mysql.Collation)
+
+	switch duckName {
 	case "FLOAT":
 		return types.Float32
 	case "DOUBLE":
 		return types.Float64
-	case "TIMESTAMP", "TIMESTAMP_S", "TIMESTAMP_MS":
-		{
-			precision := 6
-			if duckdbTypeStr == "TIMESTAMP_S" {
-				precision = 0
-			} else if duckdbTypeStr == "TIMESTAMP_MS" {
-				precision = 3
-			}
 
-			if myTypeName == "DATETIME" {
-				return types.MustCreateDatetimeType(sqltypes.Datetime, precision)
-			}
-			return types.MustCreateDatetimeType(sqltypes.Timestamp, precision)
+	case "TIMESTAMP", "TIMESTAMP_S", "TIMESTAMP_MS":
+		if mysqlName == "DATETIME" {
+			return types.MustCreateDatetimeType(sqltypes.Datetime, precision)
 		}
+		return types.MustCreateDatetimeType(sqltypes.Timestamp, precision)
+
 	case "DATE":
 		return types.Date
 	case "TIME":
 		return types.Time
+
 	case "DECIMAL":
 		return types.MustCreateDecimalType(numericPrecision, numericScale)
-	case "VARCHAR":
-		{
-			if myTypeName == "TEXT" {
-				if length <= types.TinyTextBlobMax {
-					return types.TinyText
-				} else if length <= types.TextBlobMax {
-					return types.Text
-				} else if length <= types.MediumTextBlobMax {
-					return types.MediumText
-				} else {
-					return types.LongText
-				}
-			} else if myTypeName == "VARCHAR" {
-				return types.MustCreateStringWithDefaults(sqltypes.VarChar, length)
-			} else if myTypeName == "CHAR" {
-				return types.MustCreateStringWithDefaults(sqltypes.Char, length)
-			}
-			return types.Text
-		}
-	case "BLOB":
-		{
 
-			if myTypeName == "BLOB" {
-				if length <= types.TinyTextBlobMax {
-					return types.TinyBlob
-				} else if length <= types.TextBlobMax {
-					return types.Blob
-				} else if length <= types.MediumTextBlobMax {
-					return types.MediumBlob
-				} else {
-					return types.LongBlob
-				}
-			} else if myTypeName == "VARBINARY" {
-				return types.MustCreateBinary(sqltypes.VarBinary, length)
-			} else if myTypeName == "BINARY" {
-				return types.MustCreateBinary(sqltypes.Binary, length)
+	case "VARCHAR":
+		if mysqlName == "TEXT" {
+			if length <= types.TinyTextBlobMax {
+				return types.TinyText
+			} else if length <= types.TextBlobMax {
+				return types.Text
+			} else if length <= types.MediumTextBlobMax {
+				return types.MediumText
+			} else {
+				return types.LongText
 			}
-			return types.Blob
+		} else if mysqlName == "VARCHAR" {
+			return types.MustCreateString(sqltypes.VarChar, length, collation)
+		} else if mysqlName == "CHAR" {
+			return types.MustCreateString(sqltypes.Char, length, collation)
 		}
+		return types.Text
+
+	case "BLOB":
+		if mysqlName == "BLOB" {
+			if length <= types.TinyTextBlobMax {
+				return types.TinyBlob
+			} else if length <= types.TextBlobMax {
+				return types.Blob
+			} else if length <= types.MediumTextBlobMax {
+				return types.MediumBlob
+			} else {
+				return types.LongBlob
+			}
+		} else if mysqlName == "VARBINARY" {
+			return types.MustCreateBinary(sqltypes.VarBinary, length)
+		} else if mysqlName == "BINARY" {
+			return types.MustCreateBinary(sqltypes.Binary, length)
+		}
+		return types.Blob
+
 	case "BIT":
-		{
-			if myTypeName == "BIT" {
-				return types.MustCreateBitType(uint8(length))
-			}
-			return types.MustCreateBitType(types.BitTypeMaxBits)
+		if mysqlName == "BIT" {
+			return types.MustCreateBitType(uint8(length))
 		}
+		return types.MustCreateBitType(types.BitTypeMaxBits)
+
 	case "JSON":
 		return types.JSON
+	case "ENUM":
+		return types.MustCreateEnumType(duckType.mysql.Values, collation)
 	default:
-		panic(fmt.Sprintf("encountered unknown DuckDB type(%s). This is likely a bug - please check the duckdbDataType function for missing type mappings", duckdbType))
+		panic(fmt.Sprintf("encountered unknown DuckDB type(%s). This is likely a bug - please check the duckdbDataType function for missing type mappings", duckType))
 	}
 }
