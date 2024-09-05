@@ -264,6 +264,8 @@ func isPureDataQuery(n sql.Node) bool {
 		switch tn.Database().Name() {
 		case "mysql", "information_schema", "performance_schema", "sys":
 			return false
+		case "":
+			return false
 		}
 	}
 	return true
