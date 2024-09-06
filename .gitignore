@@ -4,3 +4,4 @@ myduckserver
 *.bin
 *.log
 .replica/
+*.txt

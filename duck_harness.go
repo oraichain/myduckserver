@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -49,6 +50,7 @@ type DuckHarness struct {
 	driver                    sql.IndexDriver
 	nativeIndexSupport        bool
 	skippedQueries            map[string]struct{}
+	skippedSetupScripts       [][]setup.SetupScript
 	session                   sql.Session
 	retainSession             bool
 	setupData                 []setup.SetupScript
@@ -66,6 +68,7 @@ var _ enginetest.KeylessTableHarness = (*DuckHarness)(nil)
 var _ enginetest.ClientHarness = (*DuckHarness)(nil)
 var _ enginetest.ServerHarness = (*DuckHarness)(nil)
 var _ sql.ExternalStoredProcedureProvider = (*DuckHarness)(nil)
+var _ enginetest.SkippingHarness = (*DuckHarness)(nil)
 
 func NewDuckHarness(name string, parallelism int, numTablePartitions int, useNativeIndexes bool, driverInitializer IndexDriverInitializer) *DuckHarness {
 	externalProcedureRegistry := sql.NewExternalStoredProcedureRegistry()
@@ -92,7 +95,10 @@ func NewDuckHarness(name string, parallelism int, numTablePartitions int, useNat
 }
 
 func NewDefaultDuckHarness() *DuckHarness {
-	return NewDuckHarness("default", 1, testNumPartitions, true, nil)
+	return NewDuckHarness("default", 1, testNumPartitions, true, nil).SetupScriptsToSkip(
+		setup.Fk_tblData,     // Skip foreign key setup (not supported)
+		setup.TypestableData, // Skip enum/set type setup (not supported)
+	)
 }
 
 // func NewReadOnlyDuckHarness() *DuckHarness {
@@ -137,15 +143,72 @@ func (m *DuckHarness) NewSession() *sql.Context {
 	return m.NewContext()
 }
 
+// see querySignature for the detail
 func (m *DuckHarness) SkipQueryTest(query string) bool {
-	_, ok := m.skippedQueries[strings.ToLower(query)]
+	_, ok := m.skippedQueries[querySignature(query)]
 	return ok
 }
 
-func (m *DuckHarness) QueriesToSkip(queries ...string) {
+// see querySignature for the detail
+func (m *DuckHarness) QueriesToSkip(queries ...string) *DuckHarness {
 	for _, query := range queries {
-		m.skippedQueries[strings.ToLower(query)] = struct{}{}
+		m.skippedQueries[querySignature(query)] = struct{}{}
 	}
+	return m
+}
+
+// querySignature returns a normalized signature of the query
+// Examples:
+// - "SELECT 1 % true" -> "select_1_%_true"
+// - "select_1_%_true" -> "select_1_%_true"
+// The signature is identical to the test name in the test case,
+// allowing either the query or the test case name to be used
+// for skipping specific queries.
+func querySignature(query string) string {
+	return rewrite(strings.ToLower(query))
+}
+
+// copy from testing/match.go
+// rewrite rewrites a subname to having only printable characters and no white
+// space.
+func rewrite(s string) string {
+	b := []byte{}
+	for _, r := range s {
+		switch {
+		case isSpace(r):
+			b = append(b, '_')
+		case !strconv.IsPrint(r):
+			s := strconv.QuoteRune(r)
+			b = append(b, s[1:len(s)-1]...)
+		default:
+			b = append(b, string(r)...)
+		}
+	}
+	return string(b)
+}
+
+func isSpace(r rune) bool {
+	if r < 0x2000 {
+		switch r {
+		// Note: not the same as Unicode Z class.
+		case '\t', '\n', '\v', '\f', '\r', ' ', 0x85, 0xA0, 0x1680:
+			return true
+		}
+	} else {
+		if r <= 0x200a {
+			return true
+		}
+		switch r {
+		case 0x2028, 0x2029, 0x202f, 0x205f, 0x3000:
+			return true
+		}
+	}
+	return false
+}
+
+func (m *DuckHarness) SetupScriptsToSkip(setupScripts ...[]setup.SetupScript) *DuckHarness {
+	m.skippedSetupScripts = append(m.skippedSetupScripts, setupScripts...)
+	return m
 }
 
 func (m *DuckHarness) UseServer() {
@@ -173,16 +236,11 @@ func (s SkippingDuckHarness) SkipQueryTest(query string) bool {
 }
 
 func (m *DuckHarness) Setup(setupData ...[]setup.SetupScript) {
-	// skip unsupported setup
-	skippedSetup := [][]setup.SetupScript{
-		setup.Fk_tblData,     // Skip foreign key setup (not supported)
-		setup.TypestableData, // Skip enum/set type setup (not supported)
-	}
 
 	m.setupData = nil
 	for i := range setupData {
 		skip := false
-		for _, skipped := range skippedSetup {
+		for _, skipped := range m.skippedSetupScripts {
 			if sameSetupScript(setupData[i], skipped) {
 				skip = true
 				break
