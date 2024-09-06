@@ -92,6 +92,12 @@ func newEnumType(typ sql.EnumType) AnnotatedDuckType {
 	return AnnotatedDuckType{typeString, MySQLType{Name: "ENUM", Values: typ.Values(), Collation: uint16(typ.Collation())}}
 }
 
+func newSetType(typ sql.SetType) AnnotatedDuckType {
+	// TODO: DuckDB does not support `SET` type. We store it as a string.
+	//   We may use a `VARCHAR` type with a check constraint to enforce the values.
+	return AnnotatedDuckType{"VARCHAR", MySQLType{Name: "SET", Values: typ.Values(), Collation: uint16(typ.Collation())}}
+}
+
 const DuckDBDecimalTypeMaxPrecision = 38
 
 func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
@@ -164,7 +170,9 @@ func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
 		return newCommonType("JSON"), nil
 	case sqltypes.Enum:
 		return newEnumType(mysqlType.(types.EnumType)), nil
-	case sqltypes.Set, sqltypes.Geometry, sqltypes.Expression:
+	case sqltypes.Set:
+		return newSetType(mysqlType.(types.SetType)), nil
+	case sqltypes.Geometry, sqltypes.Expression:
 		return newCommonType(""), fmt.Errorf("unsupported MySQL type: %s", mysqlType.String())
 	default:
 		panic(fmt.Sprintf("encountered unknown MySQL type(%v). This is likely a bug - please check the duckdbDataType function for missing type mappings", mysqlType.Type()))
@@ -258,6 +266,8 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 			return types.MustCreateString(sqltypes.VarChar, length, collation)
 		} else if mysqlName == "CHAR" {
 			return types.MustCreateString(sqltypes.Char, length, collation)
+		} else if mysqlName == "SET" {
+			return types.MustCreateSetType(duckType.mysql.Values, collation)
 		}
 		return types.Text
 
@@ -289,7 +299,9 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 		return types.JSON
 	case "ENUM":
 		return types.MustCreateEnumType(duckType.mysql.Values, collation)
+	case "SET":
+		return types.MustCreateSetType(duckType.mysql.Values, collation)
 	default:
-		panic(fmt.Sprintf("encountered unknown DuckDB type(%s). This is likely a bug - please check the duckdbDataType function for missing type mappings", duckType))
+		panic(fmt.Sprintf("encountered unknown DuckDB type(%v). This is likely a bug - please check the duckdbDataType function for missing type mappings", duckType))
 	}
 }

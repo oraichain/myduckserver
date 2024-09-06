@@ -786,11 +786,24 @@ func convertSqlTypesValue(ctx *sql.Context, engine *gms.Engine, value sqltypes.V
 	var err error
 	switch {
 	case types.IsEnum(column.Type), types.IsSet(column.Type):
-		atoi, err := strconv.Atoi(value.ToString())
+		var atoi int
+		atoi, err = strconv.Atoi(value.ToString())
 		if err != nil {
 			return nil, err
 		}
 		convertedValue, _, err = column.Type.Convert(atoi)
+		if err != nil {
+			return nil, err
+		}
+
+		// NOTE(fan): We expect the enum/set value to be a string instead of an integer to be written into DuckDB.
+		switch t := column.Type.(type) {
+		case sql.EnumType:
+			convertedValue, _ = t.At(int(convertedValue.(uint16)))
+		case sql.SetType:
+			convertedValue, err = t.BitsToString(convertedValue.(uint64))
+		}
+
 	case types.IsDecimal(column.Type):
 		// Decimal values need to have any leading/trailing whitespace trimmed off
 		// TODO: Consider moving this into DecimalType_.Convert; if DecimalType_.Convert handled trimming

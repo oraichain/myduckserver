@@ -431,20 +431,20 @@ var allTypes = []typeDescription{
 	},
 
 	// Enum and Set types
-	// {
-	// 	TypeDefinition: "ENUM(\"\",\"a\",\"b\",\"c\")",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion(""),
-	// 		newTypeDescriptionAssertion("c"),
-	// 	},
-	// },
-	// {
-	// 	TypeDefinition: "SET(\"a\",\"b\",\"c\")",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("a"),
-	// 		newTypeDescriptionAssertion("a,b,c"),
-	// 	},
-	// },
+	{
+		TypeDefinition: "ENUM(\"\",\"a\",\"b\",\"c\")",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion(""),
+			newTypeDescriptionAssertion("c"),
+		},
+	},
+	{
+		TypeDefinition: "SET(\"a\",\"b\",\"c\")",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("a"),
+			newTypeDescriptionAssertion("a,b,c"),
+		},
+	},
 
 	// Date types
 	{
@@ -497,13 +497,13 @@ var allTypes = []typeDescription{
 	// },
 
 	// JSON types
-	// {
-	// 	TypeDefinition: "json",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("{}"),
-	// 		newTypeDescriptionAssertion("{\"os\":\"Mac\",\"name\":\"BillyBob\",\"resolution\":{\"x\":1920,\"y\":1080}}"),
-	// 	},
-	// },
+	{
+		TypeDefinition: "json",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("{}"),
+			newTypeDescriptionAssertion("{\"os\":\"Mac\",\"name\":\"BillyBob\",\"resolution\":{\"x\":1920,\"y\":1080}}"),
+		},
+	},
 }
 
 // ---------------------
