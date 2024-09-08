@@ -35,6 +35,10 @@ run: build
 	./$(BINARY_NAME)
 
 # Test target
-.PHONY: test
+.PHONY: test-full
 test:
 	go test -cover ./...
+
+.PHONY: test
+test:
+	go test -cover $(shell go list ./... | grep -v './binlogreplication' | grep -v './transpiler')

@@ -14,6 +14,7 @@ require (
 	github.com/marcboeker/go-duckdb v1.7.1
 	github.com/prometheus/client_golang v1.19.0
 	github.com/rs/zerolog v1.33.0
+	github.com/shopspring/decimal v1.3.1
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.9.0
 	gopkg.in/src-d/go-errors.v1 v1.0.0
@@ -62,7 +63,6 @@ require (
 	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
 	github.com/rs/xid v1.5.0 // indirect
-	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/tetratelabs/wazero v1.1.0 // indirect
 	github.com/twpayne/go-geom v1.3.6 // indirect
 	github.com/twpayne/go-kml v1.5.2-0.20200728095708-9f2fd4dfcbfe // indirect
