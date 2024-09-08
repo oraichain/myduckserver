@@ -5,3 +5,4 @@ myduckserver
 *.log
 .replica/
 *.txt
+*.out
