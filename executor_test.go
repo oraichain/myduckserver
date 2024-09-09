@@ -11,7 +11,6 @@ import (
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/plan"
-	"github.com/dolthub/go-mysql-server/sql/planbuilder"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/dolthub/vitess/go/sqltypes"
 	"github.com/stretchr/testify/assert"
@@ -109,6 +108,7 @@ func TestIsPureDataQuery(t *testing.T) {
 		[]setup.SetupScript{
 			{
 				"CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255))",
+				"CREATE table xy (x int primary key, y int, unique index y_idx(y));",
 			},
 		})
 	ctx := enginetest.NewContext(harness)
@@ -144,12 +144,16 @@ func TestIsPureDataQuery(t *testing.T) {
 			query:    "SELECT * FROM information_schema.tables",
 			expected: false,
 		},
+		// {
+		// 	name:     "Query with subquery",
+		// 	query:    "select * from xy where x in (select 1 having false);",
+		// 	expected: true,
+		// },
 	}
 	for _, tt := range tests {
-		parsed, _, err := planbuilder.Parse(ctx, engine.EngineAnalyzer().Catalog, tt.query)
+		analyzed, err := engine.AnalyzeQuery(ctx, tt.query)
 		require.NoError(t, err)
-
-		result := isPureDataQuery(parsed)
+		result := isPureDataQuery(analyzed)
 		assert.Equal(t, tt.expected, result, "isPureDataQuery() for query '%s'", tt.query)
 	}
 

@@ -65,7 +65,7 @@ func TestDebugHarness(t *testing.T) {
 	setupData := []setup.SetupScript{{
 		`create database if not exists mydb`,
 		`use mydb`,
-		"create table mytable (i bigint primary key, s CHAR(20) comment 'column s' NOT NULL)",
+		`CREATE table xy (x int primary key, y int, unique index y_idx(y));`,
 	}}
 
 	harness.Setup(setupData)
@@ -76,7 +76,7 @@ func TestDebugHarness(t *testing.T) {
 	engine.EngineAnalyzer().Verbose = true
 
 	ctx := enginetest.NewContext(harness)
-	_, iter, _, err := engine.Query(ctx, "create index mytable_i_s on mytable (i,s)")
+	_, iter, _, err := engine.Query(ctx, "select * from xy where x in (select 1 having false);")
 	require.NoError(t, err)
 	defer iter.Close(ctx)
 
@@ -317,6 +317,7 @@ var (
 		"DESCRIBE_keyless",
 		"SHOW_COLUMNS_FROM_keyless",
 		"SHOW_FULL_COLUMNS_FROM_keyless",
+		"select * from xy where x in (select 1 having false);",
 	}
 
 	// cases lead to panics

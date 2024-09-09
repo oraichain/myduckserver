@@ -35,6 +35,8 @@ type DuckBuilder struct {
 	conns       sync.Map // map[uint32]*stdsql.Conn, but sync.Map is concurrent-safe
 }
 
+var _ sql.NodeExecBuilder = (*DuckBuilder)(nil)
+
 func NewDuckBuilder(base sql.NodeExecBuilder, db *stdsql.DB, catalogName string) *DuckBuilder {
 	return &DuckBuilder{
 		base:        base,

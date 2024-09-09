@@ -79,12 +79,11 @@ func (t *Table) Schema() sql.Schema {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	schema := t.schema()
-	setPrimaryKeyColumns(schema, t.primaryKeyOrdinals())
+	schema, _ := t.schema()
 	return schema
 }
 
-func (t *Table) schema() sql.Schema {
+func (t *Table) schema() (sql.Schema, []int) {
 
 	var schema sql.Schema
 
@@ -113,7 +112,11 @@ func (t *Table) schema() sql.Schema {
 		schema = append(schema, column)
 	}
 
-	return schema
+	// Add primary key columns to the schema
+	primaryKeyOrdinals := t.primaryKeyOrdinals()
+	setPrimaryKeyColumns(schema, primaryKeyOrdinals)
+
+	return schema, primaryKeyOrdinals
 }
 
 func setPrimaryKeyColumns(schema sql.Schema, ordinals []int) {
@@ -132,9 +135,7 @@ func (t *Table) PrimaryKeySchema() sql.PrimaryKeySchema {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	schema := t.schema()
-	ordinals := t.primaryKeyOrdinals()
-	setPrimaryKeyColumns(schema, ordinals)
+	schema, ordinals := t.schema()
 	return sql.NewPrimaryKeySchema(schema, ordinals...)
 }
 
@@ -365,6 +366,16 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 	defer rows.Close()
 
 	indexes := []sql.Index{}
+
+	// Primary key is not returned by duckdb_indexes()
+	sch, pkOrds := t.schema()
+	if len(pkOrds) > 0 {
+		pkExprs := make([]sql.Expression, len(pkOrds))
+		for i, ord := range pkOrds {
+			pkExprs[i] = expression.NewGetFieldWithTable(ord, 0, sch[ord].Type, t.db.name, t.name, sch[ord].Name, sch[ord].Nullable)
+		}
+		indexes = append(indexes, NewIndex(t.db.name, t.name, "PRIMARY", true, NewComment[any](""), pkExprs))
+	}
 
 	columnsInfo, err := queryColumnsInfo(t.db.storage, t.db.catalogName, t.db.name, t.name)
 	columnsInfoMap := make(map[string]*ColumnInfo)
