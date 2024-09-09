@@ -14,15 +14,14 @@ type Index struct {
 
 var _ sql.Index = (*Index)(nil)
 
-// TODO: DuckDB doesn't have a convenient way to get the expressions from an index
-// so we need to implement our own. Storing it in the index comment is a good idea.
-func NewIndex(dbName, tableName, name string, unique bool, comment *Comment[any]) *Index {
+func NewIndex(dbName, tableName, name string, unique bool, comment *Comment[any], exprs []sql.Expression) *Index {
 	return &Index{
 		DbName:     dbName,
 		TableName:  tableName,
 		Name:       name,
 		Unique:     unique,
 		CommentObj: comment,
+		Exprs:      exprs,
 	}
 }
 
@@ -88,9 +87,16 @@ func (idx *Index) IsGenerated() bool {
 // ColumnExpressionTypes returns each expression and its associated Type.
 // Each expression string should exactly match the string returned from
 // Index.Expressions().
+// ColumnExpressionTypes implements the interface sql.Index.
 func (idx *Index) ColumnExpressionTypes() []sql.ColumnExpressionType {
-	// Assuming empty slice as default
-	return []sql.ColumnExpressionType{}
+	cets := make([]sql.ColumnExpressionType, len(idx.Exprs))
+	for i, expr := range idx.Exprs {
+		cets[i] = sql.ColumnExpressionType{
+			Expression: expr.String(),
+			Type:       expr.Type(),
+		}
+	}
+	return cets
 }
 
 // CanSupport returns whether this index supports lookups on the given

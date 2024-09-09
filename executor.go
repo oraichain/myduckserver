@@ -142,7 +142,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case *plan.ShowVariables:
 		return b.base.Build(ctx, root, r)
 	// SubqueryAlias is for select * from view
-	case *plan.ResolvedTable, *plan.SubqueryAlias:
+	case *plan.ResolvedTable, *plan.SubqueryAlias, *plan.TableAlias:
 		return b.executeQuery(ctx, node, conn)
 	case sql.Expressioner:
 		return b.executeExpressioner(ctx, node, conn)

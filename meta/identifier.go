@@ -40,3 +40,20 @@ func DecodeIndexName(encodedName string) (string, string) {
 	}
 	return parts[0], parts[1]
 }
+
+// DecodeCreateindex extracts column names from a SQL string, Only consider single-column indexes or multi-column indexes
+// TODO: using sqlparser to parse columns name, now identifiers(index name, table name, column name) cannot include parentheses.
+// such as CREATE INDEX "idx((())hello" ON db.T((t.a)); will cause an error
+func DecodeCreateindex(createIndexSQL string) []string {
+	leftParen := strings.Index(createIndexSQL, "(")
+	rightParen := strings.Index(createIndexSQL, ")")
+	if leftParen != -1 && rightParen != -1 {
+		content := createIndexSQL[leftParen+1 : rightParen]
+		columns := strings.Split(content, ",")
+		for i, col := range columns {
+			columns[i] = strings.TrimSpace(col)
+		}
+		return columns
+	}
+	return []string{}
+}

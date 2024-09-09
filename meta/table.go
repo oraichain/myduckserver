@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/marcboeker/go-duckdb"
 	"github.com/sirupsen/logrus"
 )
@@ -16,6 +17,19 @@ type Table struct {
 	name    string
 	db      *Database
 	comment *Comment[any] // save the comment to avoid querying duckdb everytime
+}
+
+type ColumnInfo struct {
+	ColumnName    string
+	ColumnIndex   int
+	DataType      sql.Type
+	IsNullable    bool
+	ColumnDefault stdsql.NullString
+	Comment       stdsql.NullString
+}
+type IndexedTable struct {
+	*Table
+	Lookup sql.IndexLookup
 }
 
 var _ sql.Table = (*Table)(nil)
@@ -71,36 +85,25 @@ func (t *Table) Schema() sql.Schema {
 }
 
 func (t *Table) schema() sql.Schema {
-	rows, err := t.db.storage.Query(`
-		SELECT column_name, data_type, is_nullable, column_default, comment, numeric_precision, numeric_scale FROM duckdb_columns() WHERE database_name = ? AND schema_name = ? AND table_name = ?
-	`, t.db.catalogName, t.db.name, t.name)
+
+	var schema sql.Schema
+
+	columnsInfo, err := queryColumnsInfo(t.db.storage, t.db.catalogName, t.db.name, t.name)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
-	defer rows.Close()
-
-	var schema sql.Schema
-	for rows.Next() {
-		var columnName, dataType string
-		var isNullable bool
-		var columnDefault stdsql.NullString
-		var comment stdsql.NullString
-		var numericPrecision, numericScale stdsql.NullInt32
-		if err := rows.Scan(&columnName, &dataType, &isNullable, &columnDefault, &comment, &numericPrecision, &numericScale); err != nil {
-			panic(ErrDuckDB.New(err))
-		}
-
+	for _, columnInfo := range columnsInfo {
 		defaultValue := (*sql.ColumnDefaultValue)(nil)
-		if columnDefault.Valid {
-			defaultValue = sql.NewUnresolvedColumnDefaultValue(columnDefault.String)
+		if columnInfo.ColumnDefault.Valid {
+			defaultValue = sql.NewUnresolvedColumnDefaultValue(columnInfo.ColumnDefault.String)
 		}
 
-		decodedComment := DecodeComment[MySQLType](comment.String)
+		decodedComment := DecodeComment[MySQLType](columnInfo.Comment.String)
 
 		column := &sql.Column{
-			Name:           columnName,
-			Type:           mysqlDataType(AnnotatedDuckType{dataType, decodedComment.Meta}, uint8(numericPrecision.Int32), uint8(numericScale.Int32)),
-			Nullable:       isNullable,
+			Name:           columnInfo.ColumnName,
+			Type:           columnInfo.DataType,
+			Nullable:       columnInfo.IsNullable,
 			Source:         t.name,
 			DatabaseSource: t.db.name,
 			Default:        defaultValue,
@@ -108,10 +111,6 @@ func (t *Table) schema() sql.Schema {
 		}
 
 		schema = append(schema, column)
-	}
-
-	if err := rows.Err(); err != nil {
-		panic(ErrDuckDB.New(err))
 	}
 
 	return schema
@@ -358,7 +357,7 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 	defer t.mu.RUnlock()
 
 	// Query to get the indexes for the table
-	rows, err := t.db.storage.Query(`SELECT index_name, is_unique, comment FROM duckdb_indexes() WHERE database_name = ? AND schema_name = ? AND table_name = ?`,
+	rows, err := t.db.storage.Query(`SELECT index_name, is_unique, comment, sql FROM duckdb_indexes() WHERE database_name = ? AND schema_name = ? AND table_name = ?`,
 		t.db.catalogName, t.db.name, t.name)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
@@ -366,18 +365,38 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 	defer rows.Close()
 
 	indexes := []sql.Index{}
+
+	columnsInfo, err := queryColumnsInfo(t.db.storage, t.db.catalogName, t.db.name, t.name)
+	columnsInfoMap := make(map[string]*ColumnInfo)
+	for _, columnInfo := range columnsInfo {
+		columnsInfoMap[columnInfo.ColumnName] = columnInfo
+	}
+
+	if err != nil {
+		return nil, ErrDuckDB.New(err)
+	}
+
 	for rows.Next() {
 		var encodedIndexName string
 		var comment stdsql.NullString
 		var isUnique bool
+		var createIndexSQL string
+		var exprs []sql.Expression
 
-		if err := rows.Scan(&encodedIndexName, &isUnique, &comment); err != nil {
+		if err := rows.Scan(&encodedIndexName, &isUnique, &comment, &createIndexSQL); err != nil {
 			return nil, ErrDuckDB.New(err)
 		}
 
 		_, indexName := DecodeIndexName(encodedIndexName)
+		columnNames := DecodeCreateindex(createIndexSQL)
 
-		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, DecodeComment[any](comment.String)))
+		for _, columnName := range columnNames {
+			if columnInfo, exists := columnsInfoMap[columnName]; exists {
+				exprs = append(exprs, expression.NewGetFieldWithTable(columnInfo.ColumnIndex, 0, columnInfo.DataType, t.db.name, t.name, columnInfo.ColumnName, columnInfo.IsNullable))
+			}
+		}
+
+		indexes = append(indexes, NewIndex(t.db.name, t.name, indexName, isUnique, DecodeComment[any](comment.String), exprs))
 	}
 
 	if err := rows.Err(); err != nil {
@@ -389,15 +408,66 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 
 // IndexedAccess implements sql.IndexAddressableTable.
 func (t *Table) IndexedAccess(lookup sql.IndexLookup) sql.IndexedTable {
-	panic("unimplemented")
+	return &IndexedTable{Table: t, Lookup: lookup}
 }
 
 // PreciseMatch implements sql.IndexAddressableTable.
 func (t *Table) PreciseMatch() bool {
-	panic("unimplemented")
+	return true
 }
 
 // Comment implements sql.CommentedTable.
 func (t *Table) Comment() string {
 	return t.comment.Text
+}
+
+func queryColumnsInfo(db *stdsql.DB, catalogName, schemaName, tableName string) ([]*ColumnInfo, error) {
+
+	rows, err := db.Query(`
+		SELECT column_name, column_index, data_type, is_nullable, column_default, comment, numeric_precision, numeric_scale
+		FROM duckdb_columns() 
+		WHERE database_name = ? AND schema_name = ? AND table_name = ?
+	`, catalogName, schemaName, tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var columnsInfo []*ColumnInfo
+
+	for rows.Next() {
+		var columnName, dataTypes string
+		var columnIndex int
+		var isNullable bool
+		var comment, columnDefault stdsql.NullString
+		var numericPrecision, numericScale stdsql.NullInt32
+
+		if err := rows.Scan(&columnName, &columnIndex, &dataTypes, &isNullable, &columnDefault, &comment, &numericPrecision, &numericScale); err != nil {
+			return nil, err
+		}
+
+		decodedComment := DecodeComment[MySQLType](comment.String)
+		dataType := mysqlDataType(AnnotatedDuckType{dataTypes, decodedComment.Meta}, uint8(numericPrecision.Int32), uint8(numericScale.Int32))
+
+		columnInfo := &ColumnInfo{
+			ColumnName:    columnName,
+			ColumnIndex:   columnIndex,
+			DataType:      dataType,
+			IsNullable:    isNullable,
+			ColumnDefault: columnDefault,
+			Comment:       comment,
+		}
+		columnsInfo = append(columnsInfo, columnInfo)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return columnsInfo, nil
+}
+
+func (t *IndexedTable) LookupPartitions(ctx *sql.Context, lookup sql.IndexLookup) (sql.PartitionIter, error) {
+
+	return nil, fmt.Errorf("unimplemented(LookupPartitions) (table: %s, query: %s)", t.name, ctx.Query())
 }
