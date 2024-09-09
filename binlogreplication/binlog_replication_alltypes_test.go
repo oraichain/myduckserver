@@ -169,20 +169,20 @@ func (td *typeDescription) IsStringType() bool {
 // test cases we need to cover (e.g. NULL values).
 var allTypes = []typeDescription{
 	// Bit types
-	// {
-	// 	TypeDefinition: "bit",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertionWithExpectedValue("0", []uint8{0}),
-	// 		newTypeDescriptionAssertionWithExpectedValue("1", []uint8{1}),
-	// 	},
-	// },
-	// {
-	// 	TypeDefinition: "bit(64)",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertionWithExpectedValue("0", []byte{0, 0, 0, 0, 0, 0, 0, 0}),
-	// 		newTypeDescriptionAssertionWithExpectedValue("1", []byte{0, 0, 0, 0, 0, 0, 0, 1}),
-	// 	},
-	// },
+	{
+		TypeDefinition: "bit",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertionWithExpectedValue("0", []uint8{0}),
+			newTypeDescriptionAssertionWithExpectedValue("1", []uint8{1}),
+		},
+	},
+	{
+		TypeDefinition: "bit(64)",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertionWithExpectedValue("0", []byte{0, 0, 0, 0, 0, 0, 0, 0}),
+			newTypeDescriptionAssertionWithExpectedValue("1", []byte{0, 0, 0, 0, 0, 0, 0, 1}),
+		},
+	},
 
 	// Integer types
 	{

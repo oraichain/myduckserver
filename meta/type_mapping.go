@@ -101,8 +101,6 @@ func newSetType(typ sql.SetType) AnnotatedDuckType {
 const DuckDBDecimalTypeMaxPrecision = 38
 
 func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
-
-	// ugly ? no, AI helps us
 	switch mysqlType.Type() {
 	case sqltypes.Int8:
 		return newNumberType("TINYINT", mysqlType.(sql.NumberType).DisplayWidth()), nil
@@ -167,7 +165,9 @@ func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
 	case sqltypes.Binary:
 		return newStringType("BLOB", "BINARY", mysqlType.(sql.StringType)), nil
 	case sqltypes.Bit:
-		return newPrecisionType("BIT", "BIT", mysqlType.(types.BitType).NumberOfBits()), nil
+		// https://dev.mysql.com/doc/refman/8.4/en/bit-type.html
+		// We store it as a 64-bit unsigned integer because the BIT type is not supported by go-duckdb currently.
+		return newPrecisionType("UBIGINT", "BIT", mysqlType.(types.BitType).NumberOfBits()), nil
 	case sqltypes.TypeJSON:
 		return newCommonType("JSON"), nil
 	case sqltypes.Enum:
@@ -222,6 +222,9 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 	case "BIGINT":
 		intBaseType = sqltypes.Int64
 	case "UBIGINT":
+		if mysqlName == "BIT" {
+			return types.MustCreateBitType(duckType.mysql.Precision)
+		}
 		intBaseType = sqltypes.Uint64
 	}
 
@@ -290,12 +293,6 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 			return types.MustCreateBinary(sqltypes.Binary, length)
 		}
 		return types.Blob
-
-	case "BIT":
-		if mysqlName == "BIT" {
-			return types.MustCreateBitType(uint8(length))
-		}
-		return types.MustCreateBitType(types.BitTypeMaxBits)
 
 	case "JSON":
 		return types.JSON
