@@ -8,8 +8,8 @@ def extract_subtest_names(test_suite, error_log_file):
     with open(error_log_file, "r") as file:
         error_log = file.read()
 
-    # Regex pattern to match the subtest names for the given test suite
-    pattern = rf'--- FAIL: {test_suite}/([^\s]+)'
+    # Regex pattern to match the subtest names for the given test suite and extract only the part after the last '/'
+    pattern = rf'--- FAIL: {test_suite}/(?:[^\s/]*/)*([^\s/]+)'
 
     # Extract all matches
     matches = re.findall(pattern, error_log)
@@ -34,4 +34,3 @@ if __name__ == "__main__":
         test_suite_name = sys.argv[1]
         error_log_filename = sys.argv[2]
         extract_subtest_names(test_suite_name, error_log_filename)
-

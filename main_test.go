@@ -33,6 +33,7 @@ import (
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	_ "github.com/dolthub/go-mysql-server/sql/variables"
+	"github.com/dolthub/vitess/go/sqltypes"
 )
 
 type indexBehaviorTestParams struct {
@@ -1059,8 +1060,177 @@ func TestTriggersErrors(t *testing.T) {
 }
 
 func TestCreateTable(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestCreateTable(t, NewDefaultDuckHarness())
+
+	waitForFixQueries := []string{
+		"CREATE_TABLE_t1_(a_INTEGER,_create_time_timestamp(6)_NOT_NULL_DEFAULT_NOW(6),_primary_key_(a))",
+		"CREATE_TABLE_t1_(a_INTEGER,_create_time_timestamp(6)_NOT_NULL_DEFAULT_NOW(6),_primary_key_(a))",
+		"CREATE_TABLE_t1_LIKE_mytable",
+		"CREATE_TABLE_t1_LIKE_mytable",
+		"CREATE_TABLE_t1_(____pk_bigint_primary_key,____v1_bigint_default_(2)_comment_'hi_there',____index_idx_v1_(v1)_comment_'index_here'____)",
+		"CREATE_TABLE_t1_(____pk_bigint_primary_key,____v1_bigint_default_(2)_comment_'hi_there',____index_idx_v1_(v1)_comment_'index_here'____)",
+		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE)",
+		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE)",
+		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE_KEY)",
+		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE_KEY)",
+		"CREATE_TABLE_t1_SELECT_*_from_mytable",
+		"CREATE_TABLE_t1_SELECT_*_from_mytable",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment_unique)",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment_unique)",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_index_(j))",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_index_(j))",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_unique(j,k))",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_unique(j,k))",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_index_(j,k))",
+		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_index_(j,k))",
+		"CREATE_TABLE_t1_(_____pk_int_NOT_NULL,_____col1_blob_DEFAULT_(_utf8mb4'abc'),_____col2_json_DEFAULT_(json_object(_utf8mb4'a',1)),_____col3_text_DEFAULT_(_utf8mb4'abc'),_____PRIMARY_KEY_(pk)___)",
+		"CREATE_TABLE_t1_(_____pk_int_NOT_NULL,_____col1_blob_DEFAULT_(_utf8mb4'abc'),_____col2_json_DEFAULT_(json_object(_utf8mb4'a',1)),_____col3_text_DEFAULT_(_utf8mb4'abc'),_____PRIMARY_KEY_(pk)___)",
+		"CREATE_TABLE_td_(_____pk_int_PRIMARY_KEY,_____col2_int_NOT_NULL_DEFAULT_2,______col3_double_NOT_NULL_DEFAULT_(round(-(1.58),0)),_____col4_varchar(10)_DEFAULT_'new_row',___________col5_float_DEFAULT_33.33,___________col6_int_DEFAULT_NULL,_____col7_timestamp_DEFAULT_NOW(),_____col8_bigint_DEFAULT_(NOW())___)",
+		"CREATE_TABLE_td_(_____pk_int_PRIMARY_KEY,_____col2_int_NOT_NULL_DEFAULT_2,______col3_double_NOT_NULL_DEFAULT_(round(-(1.58),0)),_____col4_varchar(10)_DEFAULT_'new_row',___________col5_float_DEFAULT_33.33,___________col6_int_DEFAULT_NULL,_____col7_timestamp_DEFAULT_NOW(),_____col8_bigint_DEFAULT_(NOW())___)",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_index(b1(123),_b2(456)))",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_index(b1(123),_b2(456)))",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_unique_index(b1(123),_b2(456)))",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_unique_index(b1(123),_b2(456)))",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_index(b1(10)),_index(b2(20)),_index(b1(123),_b2(456)))",
+		"create_table_t1_(i_int_primary_key,_b1_blob,_b2_blob,_index(b1(10)),_index(b2(20)),_index(b1(123),_b2(456)))",
+		"CREATE_TABLE_t1_as_select_*_from_mytable",
+		"CREATE_TABLE_t1_as_select_*_from_mytable",
+		"CREATE_TABLE_t1_as_select_*_from_mytable#01",
+		"CREATE_TABLE_t1_as_select_*_from_mytable",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable",
+		"CREATE_TABLE_t1_as_select_distinct_s,_i_from_mytable",
+		"CREATE_TABLE_t1_as_select_distinct_s,_i_from_mytable",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable_order_by_s",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable_order_by_s",
+		"CREATE_TABLE_t1_as_select_s,_sum(i)_from_mytable_group_by_s",
+		"CREATE_TABLE_t1_as_select_s,_sum(i)_from_mytable_group_by_s",
+		"CREATE_TABLE_t1_as_select_s,_sum(i)_from_mytable_group_by_s_having_sum(i)_>_2",
+		"CREATE_TABLE_t1_as_select_s,_sum(i)_from_mytable_group_by_s_having_sum(i)_>_2",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable_order_by_s_limit_1",
+		"CREATE_TABLE_t1_as_select_s,_i_from_mytable_order_by_s_limit_1",
+		"CREATE_TABLE_t1_as_select_concat(\"new\",_s),_i_from_mytable",
+		"CREATE_TABLE_t1_as_select_concat(\"new\",_s),_i_from_mytable",
+		"display_width_for_numeric_types",
+		"SHOW_FULL_FIELDS_FROM_numericDisplayWidthTest;",
+		"Validate_that_CREATE_LIKE_preserves_checks",
+		"CREATE TABLE t1 (pk int primary key, test_score int, height int CHECK (height < 10) , CONSTRAINT mycheck CHECK (test_score >= 50))",
+		"datetime_precision",
+		"CREATE_TABLE_tt_(pk_int_primary_key,_d_datetime(6)_default_current_timestamp(6))",
+		"Identifier_lengths",
+		"create_table_b_(a_int_primary_key,_constraint_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl_check_(a_>_0))",
+		"create_table_d_(a_int_primary_key,_constraint_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl_foreign_key_(a)_references_parent(a))",
+		"table_charset_options",
+		"show_create_table_t1",
+		"show_create_table_t2",
+		"show_create_table_t3",
+		"show_create_table_t4",
+		"if_not_exists_option_blocks",
+		"show_create_table_t1",
+		"show_create_table_t1#01",
+		"show_create_table_t1#02",
+		"show_create_table_t1#03",
+		"show_create_table_t1#04",
+		"create_table_with_select_preserves_default",
+		"create table a (i int primary key, j int default 100);",
+		"create_table_t1_select_*_from_a;",
+		"create_table_t2_select_j_from_a;",
+		"create_table_t3_select_j_as_i_from_a;",
+		"create_table_t4_select_j_+_1_from_a;",
+		"create_table_t5_select_a.j_from_a;",
+		"create_table_t6_select_sqa.j_from_(select_i,_j_from_a)_sqa;",
+		"show_create_table_t7;",
+		"create_table_t8_select_*_from_(select_*_from_a)_a_join_(select_*_from_b)_b;",
+		"show_create_table_t9;",
+		"create_table_t11_select_sum(j)_over()_as_jj_from_a;",
+		"create_table_t12_select_j_from_a_group_by_j;",
+		"create_table_t13_select_*_from_c;",
+		"event_contains_CREATE_TABLE_AS",
+		"CREATE_EVENT_foo_ON_SCHEDULE_EVERY_1_YEAR_DO_CREATE_TABLE_bar_AS_SELECT_1;",
+		"trigger_contains_CREATE_TABLE_AS",
+		"CREATE_TRIGGER_foo_AFTER_UPDATE_ON_t_FOR_EACH_ROW_BEGIN_CREATE_TABLE_bar_AS_SELECT_1;_END;",
+		"create_table_with_non_primary_auto_increment_column",
+		"insert_into_t1_(b)_values_(1),_(2)",
+		"show_create_table_t1",
+		"select_*_from_t1_order_by_b",
+		"create_table_with_non_primary_auto_increment_column,_separate_unique_key",
+		"insert_into_t1_(b)_values_(1),_(2)",
+		"show_create_table_t1",
+		"select_*_from_t1_order_by_b",
+		"table_with_auto_increment_table_option",
+		"create_table_t1_(i_int)_auto_increment=10;",
+		"create_table_t2_(i_int_auto_increment_primary_key)_auto_increment=10;",
+		"show_create_table_t2",
+		"insert_into_t2_values_(null),_(null),_(null)",
+		"select_*_from_t2",
+		"CREATE_TABLE_with_multiple_unnamed_indexes",
+		"create_table_with_blob_column_with_null_default",
+		"create_table_like_works_and_can_have_keys_removed",
+	}
+
+	panicQueries := []string{
+		"create_table_t7_select_(select_j_from_a)_sq_from_dual;",
+		"create_table_t9_select_*_from_json_table('[{\"c1\":_1}]',_'$[*]'_columns_(c1_int_path_'$.c1'_default_'100'_on_empty))_as_jt;",
+	}
+	harness := NewDefaultDuckHarness()
+	harness.QueriesToSkip(waitForFixQueries...)
+	harness.QueriesToSkip(panicQueries...)
+	RunCreateTableTest(t, harness)
+}
+
+// Adapted from enginetests to skip known issues and pending fixes
+func RunCreateTableTest(t *testing.T, harness enginetest.Harness) {
+	harness.Setup(setup.MydbData, setup.MytableData, setup.FooData)
+	for _, tt := range queries.CreateTableQueries {
+		t.Run(tt.WriteQuery, func(t *testing.T) {
+			enginetest.RunWriteQueryTest(t, harness, tt)
+		})
+	}
+
+	for _, script := range queries.CreateTableScriptTests {
+		enginetest.TestScript(t, harness, script)
+	}
+
+	for _, script := range queries.CreateTableInSubroutineTests {
+		enginetest.TestScript(t, harness, script)
+	}
+
+	for _, script := range queries.CreateTableAutoIncrementTests {
+		enginetest.TestScript(t, harness, script)
+	}
+
+	harness.Setup(setup.MydbData, setup.MytableData)
+	e := mustNewEngine(t, harness)
+	defer e.Close()
+
+	t.Run("no database selected", func(t *testing.T) {
+		ctx := enginetest.NewContext(harness)
+		ctx.SetCurrentDatabase("")
+
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "CREATE TABLE mydb.t11 (a INTEGER NOT NULL PRIMARY KEY, "+
+			"b VARCHAR(10) NOT NULL)", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
+
+		db, err := e.EngineAnalyzer().Catalog.Database(ctx, "mydb")
+		require.NoError(t, err)
+
+		testTable, ok, err := db.GetTableInsensitive(ctx, "t11")
+		require.NoError(t, err)
+		require.True(t, ok)
+
+		s := sql.Schema{
+			{Name: "a", Type: types.Int32, Nullable: false, PrimaryKey: true, DatabaseSource: "mydb", Source: "t11"},
+			{Name: "b", Type: types.MustCreateStringWithDefaults(sqltypes.VarChar, 10), Nullable: false, DatabaseSource: "mydb", Source: "t11"},
+		}
+
+		require.Equal(t, s, testTable.Schema())
+	})
+}
+
+func mustNewEngine(t *testing.T, h enginetest.Harness) enginetest.QueryEngine {
+	e, err := h.NewEngine(t)
+	if err != nil {
+		require.NoError(t, err)
+	}
+	return e
 }
 
 func TestRowLimit(t *testing.T) {
