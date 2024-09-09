@@ -1341,8 +1341,30 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestViews(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestViews(t, NewDefaultDuckHarness())
+	// patch view query tests since the slight difference in output format
+	replaceQueryTestByQuery(queries.ViewTests, "select * from information_schema.views where table_schema = 'mydb' order by table_name", queries.QueryTest{
+		Query: "select * from information_schema.views where table_schema = 'mydb' order by table_name",
+		Expected: []sql.Row{
+			sql.NewRow("def", "mydb", "myview", "SELECT * FROM mytable", "NONE", "YES", "root@localhost", "DEFINER", "utf8mb4", "utf8mb4_0900_bin"),
+			sql.NewRow("def", "mydb", "myview2", "SELECT * FROM myview WHERE (i = 1)", "NONE", "YES", "root@localhost", "DEFINER", "utf8mb4", "utf8mb4_0900_bin"),
+		},
+	})
+
+	waitForFixQueries := []string{
+		"insert into tab1 values (6, 0, 52.14, 'jxmel', 22, 2.27, 'pzxbn')",
+		"create view v as select 2+2",
+		"CREATE TABLE xy (x int primary key, y int);",
+		"CREATE VIEW caseSensitive AS SELECT id as AbCdEfG FROM strs;",
+		`CREATE TABLE strs ( id int NOT NULL AUTO_INCREMENT,
+                                 str  varchar(15) NOT NULL,
+                                 PRIMARY KEY (id));`,
+		"create table t (i int primary key, j int default 100);",
+		"CREATE EVENT foo ON SCHEDULE EVERY 1 YEAR DO CREATE VIEW bar AS SELECT 1;",
+		"CREATE TRIGGER foo AFTER UPDATE ON t FOR EACH ROW BEGIN CREATE TABLE bar AS SELECT 1; END;",
+	}
+	harness := NewDefaultDuckHarness()
+	harness.QueriesToSkip(waitForFixQueries...)
+	enginetest.TestViews(t, harness)
 }
 
 // func TestVersionedViews(t *testing.T) {
@@ -1622,3 +1644,12 @@ func TestSQLLogicTests(t *testing.T) {
 // 	}
 // 	logictest.RunTestFiles(h, paths...)
 // }
+
+func replaceQueryTestByQuery(tests []queries.QueryTest, targetQuery string, updatedTest queries.QueryTest) {
+	for i, test := range tests {
+		if test.Query == targetQuery {
+			tests[i] = updatedTest
+			return
+		}
+	}
+}
