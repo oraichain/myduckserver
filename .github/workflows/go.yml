@@ -41,7 +41,10 @@ jobs:
 
     - name: Build
       run: go build -v
-      
+    
+    - name: Test packages
+      run: go test -v -cover ./charset
+
     - name: Test Query Engine
       run: go test -v -cover --timeout 300s .
 

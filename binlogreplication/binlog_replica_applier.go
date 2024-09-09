@@ -15,6 +15,7 @@
 package binlogreplication
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apecloud/myduckserver/charset"
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/binlogreplication"
@@ -785,6 +787,18 @@ func convertSqlTypesValue(ctx *sql.Context, engine *gms.Engine, value sqltypes.V
 	var convertedValue interface{}
 	var err error
 	switch {
+	case types.IsTextOnly(column.Type):
+		// For text-based types, try to convert the value to a UTF-8 string.
+		t, ok := column.Type.(sql.StringType)
+		if ok {
+			convertedValue, err = charset.Decode(t.CharacterSet(), value.ToString())
+		}
+		if !ok || errors.Is(err, charset.ErrUnsupported) {
+			// Unsupported character set, return the raw bytes as a string (Go's string can hold arbitrary bytes).
+			// TODO(fan): When written to DuckDB, the string is interpreted as UTF-8, which may cause issues.
+			convertedValue, _, err = column.Type.Convert(value.ToString())
+		}
+
 	case types.IsEnum(column.Type), types.IsSet(column.Type):
 		var atoi int
 		atoi, err = strconv.Atoi(value.ToString())
@@ -819,6 +833,7 @@ func convertSqlTypesValue(ctx *sql.Context, engine *gms.Engine, value sqltypes.V
 		convertedValue = convertedValue.(types.Timespan).String()
 	default:
 		convertedValue, _, err = column.Type.Convert(value.ToString())
+		// logrus.WithField("column", column.Name).WithField("type", column.Type).Infof("Converting value[%s %v %s] to %v", value.Type(), value.Raw(), value.ToString(), convertedValue)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert value %q, for column of type %T: %v", value.ToString(), column.Type, err.Error())

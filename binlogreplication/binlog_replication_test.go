@@ -441,8 +441,6 @@ func TestForeignKeyChecks(t *testing.T) {
 
 // TestCharsetsAndCollations tests that we can successfully replicate data using various charsets and collations.
 func TestCharsetsAndCollations(t *testing.T) {
-	t.SkipNow()
-
 	defer teardown(t)
 	startSqlServersWithSystemVars(t, duckReplicaSystemVars)
 	startReplicationAndCreateTestDb(t, mySqlPort)
