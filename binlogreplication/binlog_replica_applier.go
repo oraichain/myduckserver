@@ -811,6 +811,12 @@ func convertSqlTypesValue(ctx *sql.Context, engine *gms.Engine, value sqltypes.V
 		convertedValue, _, err = column.Type.Convert(strings.TrimSpace(value.ToString()))
 	case types.IsJSON(column.Type):
 		convertedValue, err = convertVitessJsonExpressionString(ctx, engine, value)
+	case types.IsTimespan(column.Type):
+		convertedValue, _, err = column.Type.Convert(value.ToString())
+		if err != nil {
+			return nil, err
+		}
+		convertedValue = convertedValue.(types.Timespan).String()
 	default:
 		convertedValue, _, err = column.Type.Convert(value.ToString())
 	}

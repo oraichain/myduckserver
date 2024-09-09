@@ -133,7 +133,9 @@ func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
 	case sqltypes.Date:
 		return newCommonType("DATE"), nil
 	case sqltypes.Time:
-		return newCommonType("TIME"), nil
+		// https://dev.mysql.com/doc/refman/8.4/en/time.html
+		// MySQL's TIME type can store a value within the range of '-838:59:59.000000' to '838:59:59.000000'.
+		return newSimpleType("INTERVAL", "TIME"), nil
 	case sqltypes.Datetime:
 		return newDateTimeType("DATETIME", mysqlType.(sql.DatetimeType).Precision()), nil
 	case sqltypes.Year:
@@ -245,7 +247,7 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 
 	case "DATE":
 		return types.Date
-	case "TIME":
+	case "INTERVAL", "TIME":
 		return types.Time
 
 	case "DECIMAL":

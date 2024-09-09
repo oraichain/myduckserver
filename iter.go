@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/marcboeker/go-duckdb"
 	"github.com/shopspring/decimal"
 )
@@ -28,12 +29,13 @@ var _ sql.RowIter = (*SQLRowIter)(nil)
 
 // SQLRowIter wraps a standard sql.Rows as a RowIter.
 type SQLRowIter struct {
-	rows     *stdsql.Rows
-	columns  []*stdsql.ColumnType
-	schema   sql.Schema
-	buffer   []any // pre-allocated buffer for scanning values
-	pointers []any // pointers to the buffer
-	decimals []int
+	rows      *stdsql.Rows
+	columns   []*stdsql.ColumnType
+	schema    sql.Schema
+	buffer    []any // pre-allocated buffer for scanning values
+	pointers  []any // pointers to the buffer
+	decimals  []int
+	intervals []int
 }
 
 func NewSQLRowIter(rows *stdsql.Rows, schema sql.Schema) (*SQLRowIter, error) {
@@ -49,13 +51,20 @@ func NewSQLRowIter(rows *stdsql.Rows, schema sql.Schema) (*SQLRowIter, error) {
 		}
 	}
 
+	var intervals []int
+	for i, t := range columns {
+		if strings.HasPrefix(t.DatabaseTypeName(), "INTERVAL") {
+			intervals = append(intervals, i)
+		}
+	}
+
 	width := max(len(columns), len(schema))
 	buf := make([]any, width)
 	ptrs := make([]any, width)
 	for i := range buf {
 		ptrs[i] = &buf[i]
 	}
-	return &SQLRowIter{rows, columns, schema, buf, ptrs, decimals}, nil
+	return &SQLRowIter{rows, columns, schema, buf, ptrs, decimals, intervals}, nil
 }
 
 // Next retrieves the next row. It will return io.EOF if it's the last row.
@@ -83,6 +92,15 @@ func (iter *SQLRowIter) Next(ctx *sql.Context) (sql.Row, error) {
 			iter.buffer[idx], _ = decimal.NewFromString(v)
 		default:
 			// nothing to do
+		}
+	}
+
+	// Process interval values
+	for _, idx := range iter.intervals {
+		t := types.TimespanType_{}
+		switch v := iter.buffer[idx].(type) {
+		case duckdb.Interval:
+			iter.buffer[idx] = t.MicrosecondsToTimespan(v.Micros + int64(v.Days)*24*60*60*1e6) // ignore the month part, which does not appear in MySQL
 		}
 	}
 

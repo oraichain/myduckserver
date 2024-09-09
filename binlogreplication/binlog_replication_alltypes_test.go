@@ -454,13 +454,13 @@ var allTypes = []typeDescription{
 			newTypeDescriptionAssertion("DATE('1981-02-16')"),
 		},
 	},
-	// {
-	// 	TypeDefinition: "time",
-	// 	Assertions: [2]typeDescriptionAssertion{
-	// 		newTypeDescriptionAssertion("TIME('01:02:03')"),
-	// 		newTypeDescriptionAssertion("TIME('01:02:03')"),
-	// 	},
-	// },
+	{
+		TypeDefinition: "time",
+		Assertions: [2]typeDescriptionAssertion{
+			newTypeDescriptionAssertion("TIME('01:02:03')"),
+			newTypeDescriptionAssertion("TIME('01:02:03')"),
+		},
+	},
 	{
 		TypeDefinition: "datetime",
 		Assertions: [2]typeDescriptionAssertion{
