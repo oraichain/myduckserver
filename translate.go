@@ -42,22 +42,12 @@ var (
 	errPythonProcessUnhealthy = errors.NewKind("sqlglot python process is unhealthy: %s")
 )
 
-type translationRequest struct {
-	cmd string
-	sql string
-}
-
-type translationResponse struct {
-	result string
-	err    error
-}
-
 type translateService struct {
-	requestChan  chan translationRequest
-	responseChan chan translationResponse
-	pythonStdin  io.WriteCloser
-	pythonCmd    *exec.Cmd
-	stderrBuf    *bytes.Buffer
+	mu       *sync.Mutex
+	pyCmd    *exec.Cmd
+	pyStdin  io.Writer
+	pyStdout io.Reader
+	pyStderr *bytes.Buffer
 }
 
 var (
@@ -118,37 +108,33 @@ while True:
             write_string(RESULT_ERR + str(e))
 `, cmdExit, cmdRun, resultOK, resultErr)
 
-	pythonCmd := exec.Command(pythonPath, "-u", "-c", pythonScript)
+	pyCmd := exec.Command(pythonPath, "-u", "-c", pythonScript)
 
-	pythonStdin, err := pythonCmd.StdinPipe()
+	pyStdin, err := pyCmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdin pipe: %v", err)
 	}
 
-	stdout, err := pythonCmd.StdoutPipe()
+	pyStdout, err := pyCmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout pipe: %v", err)
 	}
 
 	var stderrBuf bytes.Buffer
-	pythonCmd.Stderr = &stderrBuf
+	pyCmd.Stderr = &stderrBuf
 
-	err = pythonCmd.Start()
+	err = pyCmd.Start()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start Python process: %v", err)
 	}
 
-	requestChan := make(chan translationRequest)
-	responseChan := make(chan translationResponse)
-
 	svc := &translateService{
-		requestChan:  requestChan,
-		responseChan: responseChan,
-		pythonStdin:  pythonStdin,
-		pythonCmd:    pythonCmd,
-		stderrBuf:    &stderrBuf,
+		mu:       &sync.Mutex{},
+		pyCmd:    pyCmd,
+		pyStdin:  pyStdin,
+		pyStdout: bufio.NewReader(pyStdout),
+		pyStderr: &stderrBuf,
 	}
-	go svc.handleTranslations(pythonStdin, bufio.NewReader(stdout))
 
 	// Test the translation service with a simple query
 	testSQL := "SELECT 1"
@@ -166,45 +152,38 @@ while True:
 }
 
 func (svc *translateService) translate(sql string) (string, error) {
-	svc.requestChan <- translationRequest{cmd: cmdRun, sql: sql}
-	response := <-svc.responseChan
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
 
-	if errors.Is(response.err, errPythonProcessUnhealthy) {
-		svc.cleanup()
-		panic(fmt.Errorf("%v\ncmd:\n%s\nstderr:\n%s", response.err, svc.pythonCmd.String(), svc.stderrBuf.String()))
+	translatedSQL, err := translateInternalImpl(svc.pyStdin, svc.pyStdout, sql)
+	if err != nil {
+		if errors.Is(err, errPythonProcessUnhealthy) {
+			panic(fmt.Errorf("%v\ncmd:\n%s\nstderr:\n%s", err, svc.pyCmd.String(), svc.pyStderr.String()))
+		}
+		return "", err
 	}
-
-	return response.result, response.err
+	return translatedSQL, nil
 }
 
-func (svc *translateService) handleTranslations(stdin io.Writer, stdout *bufio.Reader) {
-	for req := range svc.requestChan {
-		if req.cmd == cmdExit {
-			sendString(stdin, cmdExit)
-			break
-		}
+func translateInternalImpl(pyStdin io.Writer, pyStdout io.Reader, sql string) (string, error) {
+	err := sendString(pyStdin, cmdRun+sql)
+	if err != nil {
+		return "", errPythonProcessUnhealthy.New(err)
+	}
 
-		err := sendString(stdin, cmdRun+req.sql)
-		if err != nil {
-			svc.responseChan <- translationResponse{"", errPythonProcessUnhealthy.New(err)}
-			continue
-		}
+	result, err := recvString(pyStdout)
+	if err != nil {
+		return "", errPythonProcessUnhealthy.New(err)
+	}
 
-		result, err := recvString(stdout)
-		if err != nil {
-			svc.responseChan <- translationResponse{"", errPythonProcessUnhealthy.New(err)}
-			continue
-		}
+	result = strings.TrimSpace(result)
 
-		result = strings.TrimSpace(result)
-
-		if strings.HasPrefix(result, resultErr) {
-			svc.responseChan <- translationResponse{"", fmt.Errorf(result[len(resultErr):])}
-		} else if strings.HasPrefix(result, resultOK) {
-			svc.responseChan <- translationResponse{strings.TrimSpace(result[len(resultOK):]), nil}
-		} else {
-			svc.responseChan <- translationResponse{"", fmt.Errorf("unexpected result: %s", result)}
-		}
+	if strings.HasPrefix(result, resultErr) {
+		return "", fmt.Errorf(result[len(resultErr):])
+	} else if strings.HasPrefix(result, resultOK) {
+		return strings.TrimSpace(result[len(resultOK):]), nil
+	} else {
+		return "", fmt.Errorf("unexpected result: %s", result)
 	}
 }
 
@@ -222,7 +201,7 @@ func sendString(writer io.Writer, str string) error {
 	return err
 }
 
-func recvString(reader *bufio.Reader) (string, error) {
+func recvString(reader io.Reader) (string, error) {
 	lengthBytes := make([]byte, 4)
 	_, err := io.ReadFull(reader, lengthBytes)
 	if err != nil {
@@ -238,10 +217,10 @@ func recvString(reader *bufio.Reader) (string, error) {
 }
 
 func (svc *translateService) cleanup() {
-	svc.requestChan <- translationRequest{cmd: cmdExit}
-	svc.pythonCmd.Wait()
-	close(svc.requestChan)
-	close(svc.responseChan)
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	sendString(svc.pyStdin, cmdExit)
+	svc.pyCmd.Wait()
 }
 
 func translate(node sql.Node, sql string) (string, error) {

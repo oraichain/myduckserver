@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -63,4 +64,29 @@ func TestTranslate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTranslateConcurrent(t *testing.T) {
+	concurrency := 1000
+	wg := sync.WaitGroup{}
+	wg.Add(concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			sql := fmt.Sprintf("SELECT * FROM users WHERE id = %d", i)
+			expectedSQL := sql
+
+			translatedSQL, err := translateWithSQLGlot(sql)
+			if err != nil {
+				t.Errorf("translate(%q) returned an error: %v", sql, err)
+			}
+			if translatedSQL != expectedSQL {
+				t.Errorf("translate(%q) = %v; want %v", sql, translatedSQL, expectedSQL)
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
