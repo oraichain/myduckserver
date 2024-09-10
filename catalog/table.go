@@ -1,4 +1,4 @@
-package meta
+package catalog
 
 import (
 	stdsql "database/sql"

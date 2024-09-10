@@ -1,4 +1,4 @@
-package meta
+package catalog
 
 import "github.com/dolthub/go-mysql-server/sql"
 

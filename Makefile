@@ -46,7 +46,7 @@ test-full:
 	@$(SHOW_TOTAL_COVERAGE)
 
 test:
-	$(TEST_CMD) $(shell go list ./... | grep -v './binlogreplication' | grep -v './transpiler')
+	$(TEST_CMD) $(shell go list ./... | grep -v './binlogreplication')
 	@$(SHOW_TOTAL_COVERAGE)
 
 cover:

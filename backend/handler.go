@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package backend
 
 import (
 	"context"
@@ -49,7 +49,7 @@ func (h *MyHandler) ComInitDB(c *mysql.Conn, schemaName string) error {
 	return h.Handler.ComInitDB(c, schemaName)
 }
 
-func wrapHandler(b *DuckBuilder) server.HandlerWrapper {
+func WrapHandler(b *DuckBuilder) server.HandlerWrapper {
 	return func(h mysql.Handler) (mysql.Handler, error) {
 		handler, ok := h.(*server.Handler)
 		if !ok {

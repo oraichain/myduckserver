@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+package backend
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/apecloud/myduckserver/meta"
+	"github.com/apecloud/myduckserver/catalog"
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
@@ -27,11 +27,11 @@ import (
 
 type Session struct {
 	*memory.Session
-	db *meta.DbProvider
+	db *catalog.DatabaseProvider
 }
 
 // NewSessionBuilder returns a session builder for the given database provider.
-func NewSessionBuilder(provider *meta.DbProvider) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
+func NewSessionBuilder(provider *catalog.DatabaseProvider) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
 	_, err := provider.Storage().Exec("CREATE TABLE IF NOT EXISTS main.persistent_variables (name TEXT PRIMARY KEY, value TEXT, type TEXT)")
 	if err != nil {
 		panic(err)

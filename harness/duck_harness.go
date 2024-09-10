@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package harness
 
 import (
 	"context"
@@ -25,7 +25,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/apecloud/myduckserver/meta"
+	"github.com/apecloud/myduckserver/backend"
+	"github.com/apecloud/myduckserver/catalog"
 	"github.com/dolthub/vitess/go/mysql"
 
 	sqle "github.com/dolthub/go-mysql-server"
@@ -36,7 +37,7 @@ import (
 	"github.com/dolthub/go-mysql-server/sql"
 )
 
-const testNumPartitions = 5
+const TestNumPartitions = 5
 
 type IndexDriverInitializer func([]sql.Database) sql.IndexDriver
 
@@ -95,7 +96,7 @@ func NewDuckHarness(name string, parallelism int, numTablePartitions int, useNat
 }
 
 func NewDefaultDuckHarness() *DuckHarness {
-	return NewDuckHarness("default", 1, testNumPartitions, true, nil).SetupScriptsToSkip(
+	return NewDuckHarness("default", 1, TestNumPartitions, true, nil).SetupScriptsToSkip(
 		setup.Fk_tblData,     // Skip foreign key setup (not supported)
 		setup.TypestableData, // Skip enum/set type setup (not supported)
 	)
@@ -294,8 +295,8 @@ func NewEngine(t *testing.T, harness enginetest.Harness, dbProvider sql.Database
 	e := enginetest.NewEngineWithProvider(t, harness, dbProvider)
 	e.Analyzer.Catalog.StatsProvider = statsProvider
 
-	provider := dbProvider.(*meta.DbProvider)
-	builder := NewDuckBuilder(e.Analyzer.ExecBuilder, provider.Storage(), provider.CatalogName())
+	provider := dbProvider.(*catalog.DatabaseProvider)
+	builder := backend.NewDuckBuilder(e.Analyzer.ExecBuilder, provider.Storage(), provider.CatalogName())
 	e.Analyzer.ExecBuilder = builder
 
 	ctx := enginetest.NewContext(harness)
@@ -375,18 +376,18 @@ func (m *DuckHarness) getProvider() sql.DatabaseProvider {
 	defer m.mu.Unlock()
 
 	if m.provider == nil {
-		m.provider = m.NewDatabaseProvider().(*meta.DbProvider)
+		m.provider = m.NewDatabaseProvider().(*catalog.DatabaseProvider)
 	}
 
 	return m.provider
 }
 
 func (m *DuckHarness) NewDatabaseProvider() sql.MutableDatabaseProvider {
-	return meta.NewInMemoryDBProvider()
+	return catalog.NewInMemoryDBProvider()
 }
 
-func (m *DuckHarness) Provider() *meta.DbProvider {
-	return m.getProvider().(*meta.DbProvider)
+func (m *DuckHarness) Provider() *catalog.DatabaseProvider {
+	return m.getProvider().(*catalog.DatabaseProvider)
 }
 
 func (m *DuckHarness) ValidateEngine(ctx *sql.Context, e *sqle.Engine) error {

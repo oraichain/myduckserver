@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/dolthub/go-mysql-server/enginetest"
-	"github.com/dolthub/go-mysql-server/enginetest/scriptgen/setup"
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -99,62 +97,4 @@ func TestDuckBuilder_Select(t *testing.T) {
 	assert.NoError(t, err, "Closing the iterator should not return an error")
 
 	assert.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestIsPureDataQuery(t *testing.T) {
-	harness := NewDefaultDuckHarness()
-	harness.Setup(
-		setup.MydbData,
-		[]setup.SetupScript{
-			{
-				"CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255))",
-				"CREATE table xy (x int primary key, y int, unique index y_idx(y));",
-			},
-		})
-	ctx := enginetest.NewContext(harness)
-	engine, err := harness.NewEngine(t)
-	require.NoError(t, err)
-	tests := []struct {
-		name     string
-		query    string
-		expected bool
-	}{
-		{
-			name:     "Simple SELECT query",
-			query:    "SELECT * FROM users",
-			expected: true,
-		},
-		{
-			name:     "Query from mysql system table",
-			query:    "SELECT * FROM mysql.user",
-			expected: false,
-		},
-		{
-			name:     "Query with system function",
-			query:    "SELECT DATABASE()",
-			expected: false,
-		},
-		// {
-		// 	name:     "Query with subquery from system table",
-		// 	query:    "SELECT u.name, (SELECT COUNT(*) FROM mysql.user) FROM users u",
-		// 	expected: false,
-		// },
-		{
-			name:     "Query from information_schema",
-			query:    "SELECT * FROM information_schema.tables",
-			expected: false,
-		},
-		// {
-		// 	name:     "Query with subquery",
-		// 	query:    "select * from xy where x in (select 1 having false);",
-		// 	expected: true,
-		// },
-	}
-	for _, tt := range tests {
-		analyzed, err := engine.AnalyzeQuery(ctx, tt.query)
-		require.NoError(t, err)
-		result := isPureDataQuery(analyzed)
-		assert.Equal(t, tt.expected, result, "isPureDataQuery() for query '%s'", tt.query)
-	}
-
 }

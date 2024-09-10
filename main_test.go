@@ -23,6 +23,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/apecloud/myduckserver/backend"
+	"github.com/apecloud/myduckserver/harness"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dolthub/go-mysql-server/enginetest"
@@ -36,9 +38,15 @@ import (
 	"github.com/dolthub/vitess/go/sqltypes"
 )
 
+var NewDuckHarness = harness.NewDuckHarness
+var NewDefaultDuckHarness = harness.NewDefaultDuckHarness
+var NewSkippingDuckHarness = harness.NewSkippingDuckHarness
+
+const testNumPartitions = harness.TestNumPartitions
+
 type indexBehaviorTestParams struct {
 	name              string
-	driverInitializer IndexDriverInitializer
+	driverInitializer harness.IndexDriverInitializer
 	nativeIndexes     bool
 }
 
@@ -88,7 +96,63 @@ func TestDebugHarness(t *testing.T) {
 		require.NoError(t, err)
 		fmt.Println(row)
 	}
+}
 
+func TestIsPureDataQuery(t *testing.T) {
+	harness := NewDefaultDuckHarness()
+	harness.Setup(
+		setup.MydbData,
+		[]setup.SetupScript{
+			{
+				"CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255))",
+				"CREATE table xy (x int primary key, y int, unique index y_idx(y));",
+			},
+		})
+	ctx := enginetest.NewContext(harness)
+	engine, err := harness.NewEngine(t)
+	require.NoError(t, err)
+	tests := []struct {
+		name     string
+		query    string
+		expected bool
+	}{
+		{
+			name:     "Simple SELECT query",
+			query:    "SELECT * FROM users",
+			expected: true,
+		},
+		{
+			name:     "Query from mysql system table",
+			query:    "SELECT * FROM mysql.user",
+			expected: false,
+		},
+		{
+			name:     "Query with system function",
+			query:    "SELECT DATABASE()",
+			expected: false,
+		},
+		// {
+		// 	name:     "Query with subquery from system table",
+		// 	query:    "SELECT u.name, (SELECT COUNT(*) FROM mysql.user) FROM users u",
+		// 	expected: false,
+		// },
+		{
+			name:     "Query from information_schema",
+			query:    "SELECT * FROM information_schema.tables",
+			expected: false,
+		},
+		// {
+		// 	name:     "Query with subquery",
+		// 	query:    "select * from xy where x in (select 1 having false);",
+		// 	expected: true,
+		// },
+	}
+	for _, tt := range tests {
+		analyzed, err := engine.AnalyzeQuery(ctx, tt.query)
+		require.NoError(t, err)
+		result := backend.IsPureDataQuery(analyzed)
+		require.Equal(t, tt.expected, result, "isPureDataQuery() for query '%s'", tt.query)
+	}
 }
 
 var (
@@ -318,6 +382,7 @@ var (
 		"SHOW_COLUMNS_FROM_keyless",
 		"SHOW_FULL_COLUMNS_FROM_keyless",
 		"select * from xy where x in (select 1 having false);",
+		"select_now()_=_sysdate(),_sleep(0.1),_now(6)_<_sysdate(6);",
 	}
 
 	// cases lead to panics

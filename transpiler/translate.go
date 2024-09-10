@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package transpiler
 
 import (
 	"bufio"
@@ -223,7 +223,7 @@ func (svc *translateService) cleanup() {
 	svc.pyCmd.Wait()
 }
 
-func translate(node sql.Node, sql string) (string, error) {
+func Translate(node sql.Node, sql string) (string, error) {
 	switch node.(type) {
 	case *plan.CreateTable,
 		// Convert the CREATE TABLE statement using the built-in transpiler; ignore possible create index statements for now
@@ -234,17 +234,17 @@ func translate(node sql.Node, sql string) (string, error) {
 		return translateBuiltIn(sql)
 	default:
 		// For other types of queries, use SQLGlot to convert the query
-		return translateWithSQLGlot(sql)
+		return TranslateWithSQLGlot(sql)
 	}
 }
 
 func translateBuiltIn(sql string) (string, error) {
 	// TODO(fan): https://github.com/dolthub/doltgresql/issues/660
 	// return transpiler.ConvertQuery(sql)[0], nil
-	return translateWithSQLGlot(sql)
+	return TranslateWithSQLGlot(sql)
 }
 
-func translateWithSQLGlot(sql string) (string, error) {
+func TranslateWithSQLGlot(sql string) (string, error) {
 	translationSvcOnce.Do(func() {
 		svc, err := newTranslateService()
 		if err != nil {

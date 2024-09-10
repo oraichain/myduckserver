@@ -1,4 +1,4 @@
-package meta
+package catalog
 
 import (
 	"fmt"
@@ -15,18 +15,18 @@ import (
 	"github.com/apecloud/myduckserver/configuration"
 )
 
-type DbProvider struct {
+type DatabaseProvider struct {
 	mu          *sync.RWMutex
 	storage     *stdsql.DB
 	catalogName string
 	dataDir     string
 }
 
-var _ sql.DatabaseProvider = (*DbProvider)(nil)
-var _ sql.MutableDatabaseProvider = (*DbProvider)(nil)
-var _ configuration.DataDirProvider = (*DbProvider)(nil)
+var _ sql.DatabaseProvider = (*DatabaseProvider)(nil)
+var _ sql.MutableDatabaseProvider = (*DatabaseProvider)(nil)
+var _ configuration.DataDirProvider = (*DatabaseProvider)(nil)
 
-func NewInMemoryDBProvider() *DbProvider {
+func NewInMemoryDBProvider() *DatabaseProvider {
 	prov, err := NewDBProvider(".", "")
 	if err != nil {
 		panic(err)
@@ -34,7 +34,7 @@ func NewInMemoryDBProvider() *DbProvider {
 	return prov
 }
 
-func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
+func NewDBProvider(dataDir, dbFile string) (*DatabaseProvider, error) {
 	dbFile = strings.TrimSpace(dbFile)
 	name := ""
 	dsn := ""
@@ -62,7 +62,7 @@ func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
 		return nil, err
 	}
 
-	return &DbProvider{
+	return &DatabaseProvider{
 		mu:          &sync.RWMutex{},
 		storage:     storage,
 		catalogName: name,
@@ -70,24 +70,24 @@ func NewDBProvider(dataDir, dbFile string) (*DbProvider, error) {
 	}, nil
 }
 
-func (prov *DbProvider) Close() error {
+func (prov *DatabaseProvider) Close() error {
 	return prov.storage.Close()
 }
 
-func (prov *DbProvider) Storage() *stdsql.DB {
+func (prov *DatabaseProvider) Storage() *stdsql.DB {
 	return prov.storage
 }
 
-func (prov *DbProvider) CatalogName() string {
+func (prov *DatabaseProvider) CatalogName() string {
 	return prov.catalogName
 }
 
-func (prov *DbProvider) DataDir() string {
+func (prov *DatabaseProvider) DataDir() string {
 	return prov.dataDir
 }
 
 // AllDatabases implements sql.DatabaseProvider.
-func (prov *DbProvider) AllDatabases(ctx *sql.Context) []sql.Database {
+func (prov *DatabaseProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
@@ -120,7 +120,7 @@ func (prov *DbProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 }
 
 // Database implements sql.DatabaseProvider.
-func (prov *DbProvider) Database(ctx *sql.Context, name string) (sql.Database, error) {
+func (prov *DatabaseProvider) Database(ctx *sql.Context, name string) (sql.Database, error) {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
@@ -136,7 +136,7 @@ func (prov *DbProvider) Database(ctx *sql.Context, name string) (sql.Database, e
 }
 
 // HasDatabase implements sql.DatabaseProvider.
-func (prov *DbProvider) HasDatabase(ctx *sql.Context, name string) bool {
+func (prov *DatabaseProvider) HasDatabase(ctx *sql.Context, name string) bool {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
@@ -158,7 +158,7 @@ func hasDatabase(engine *stdsql.DB, dstName string, name string) (bool, error) {
 }
 
 // CreateDatabase implements sql.MutableDatabaseProvider.
-func (prov *DbProvider) CreateDatabase(ctx *sql.Context, name string) error {
+func (prov *DatabaseProvider) CreateDatabase(ctx *sql.Context, name string) error {
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
@@ -171,7 +171,7 @@ func (prov *DbProvider) CreateDatabase(ctx *sql.Context, name string) error {
 }
 
 // DropDatabase implements sql.MutableDatabaseProvider.
-func (prov *DbProvider) DropDatabase(ctx *sql.Context, name string) error {
+func (prov *DatabaseProvider) DropDatabase(ctx *sql.Context, name string) error {
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 

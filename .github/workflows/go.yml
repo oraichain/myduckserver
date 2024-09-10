@@ -43,7 +43,7 @@ jobs:
       run: go build -v
     
     - name: Test packages
-      run: go test -v -cover ./charset
+      run: go test -v -cover ./charset ./transpiler ./backend ./harness
 
     - name: Test Query Engine
       run: go test -v -cover --timeout 300s .

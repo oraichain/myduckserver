@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+package backend
 
 import (
 	"context"
@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/apecloud/myduckserver/meta"
+	"github.com/apecloud/myduckserver/catalog"
+	"github.com/apecloud/myduckserver/transpiler"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
 	"github.com/dolthub/go-mysql-server/sql/plan"
@@ -66,8 +67,8 @@ func (b *DuckBuilder) GetConn(ctx context.Context, id uint32, schemaName string)
 			logrus.WithError(err).Error("Failed to get current schema")
 			return nil, err
 		} else if currentSchema != schemaName {
-			if _, err := conn.ExecContext(ctx, "USE "+meta.FullSchemaName(b.catalogName, schemaName)); err != nil {
-				if meta.IsDuckDBSetSchemaNotFoundError(err) {
+			if _, err := conn.ExecContext(ctx, "USE "+catalog.FullSchemaName(b.catalogName, schemaName)); err != nil {
+				if catalog.IsDuckDBSetSchemaNotFoundError(err) {
 					return nil, sql.ErrDatabaseNotFound.New(schemaName)
 				}
 				logrus.WithField("schema", schemaName).WithError(err).Error("Failed to switch schema")
@@ -108,7 +109,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	}
 
 	// Fallback to the base builder if the plan contains system/user variables or is not a pure data query.
-	if containsVariable(n) || !isPureDataQuery(n) {
+	if containsVariable(n) || !IsPureDataQuery(n) {
 		return b.base.Build(ctx, root, r)
 	}
 
@@ -121,9 +122,9 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 	switch node := n.(type) {
 	case *plan.Use:
-		useStmt := "USE " + meta.FullSchemaName(b.catalogName, node.Database().Name())
+		useStmt := "USE " + catalog.FullSchemaName(b.catalogName, node.Database().Name())
 		if _, err := conn.ExecContext(ctx.Context, useStmt); err != nil {
-			if meta.IsDuckDBSetSchemaNotFoundError(err) {
+			if catalog.IsDuckDBSetSchemaNotFoundError(err) {
 				return nil, sql.ErrDatabaseNotFound.New(node.Database().Name())
 			}
 			return nil, err
@@ -182,7 +183,7 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 	case *plan.ShowTables:
 		duckSQL = ctx.Query()
 	default:
-		duckSQL, err = translate(n, ctx.Query())
+		duckSQL, err = transpiler.Translate(n, ctx.Query())
 	}
 	if err != nil {
 		return nil, err
@@ -204,7 +205,7 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 
 func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
 	// Translate the MySQL query to a DuckDB query
-	duckSQL, err := translate(n, ctx.Query())
+	duckSQL, err := transpiler.Translate(n, ctx.Query())
 	if err != nil {
 		return nil, err
 	}
@@ -250,13 +251,13 @@ func containsVariable(n sql.Node) bool {
 	return found
 }
 
-// isPureDataQuery inspects if the plan is a pure data query,
+// IsPureDataQuery inspects if the plan is a pure data query,
 // i.e., it operates on (>=1) data tables and does not touch any system tables.
 // The following examples are NOT pure data queries:
 // - `SELECT * FROM mysql.*`
 // - `TRUNCATE mysql.user`
 // - `SELECT DATABASE()`
-func isPureDataQuery(n sql.Node) bool {
+func IsPureDataQuery(n sql.Node) bool {
 	c := &tableNodeCollector{}
 	transform.Walk(c, n)
 	if len(c.tables) == 0 {

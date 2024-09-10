@@ -1,4 +1,4 @@
-package main
+package transpiler
 
 import (
 	"fmt"
@@ -52,7 +52,7 @@ func TestTranslate(t *testing.T) {
 	// Loop over each test case
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := translateWithSQLGlot(tc.input)
+			result, err := TranslateWithSQLGlot(tc.input)
 			if err != nil {
 				t.Errorf("translate(%q) returned an error: %v", tc.input, err)
 			}
@@ -78,7 +78,7 @@ func TestTranslateConcurrent(t *testing.T) {
 			sql := fmt.Sprintf("SELECT * FROM users WHERE id = %d", i)
 			expectedSQL := sql
 
-			translatedSQL, err := translateWithSQLGlot(sql)
+			translatedSQL, err := TranslateWithSQLGlot(sql)
 			if err != nil {
 				t.Errorf("translate(%q) returned an error: %v", sql, err)
 			}
