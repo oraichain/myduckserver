@@ -23,6 +23,7 @@ import (
 	"github.com/apecloud/myduckserver/transpiler"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
+	"github.com/dolthub/go-mysql-server/sql/expression/function"
 	"github.com/dolthub/go-mysql-server/sql/plan"
 	"github.com/dolthub/go-mysql-server/sql/transform"
 	"github.com/dolthub/go-mysql-server/sql/types"
@@ -258,31 +259,69 @@ func containsVariable(n sql.Node) bool {
 // - `TRUNCATE mysql.user`
 // - `SELECT DATABASE()`
 func IsPureDataQuery(n sql.Node) bool {
-	c := &tableNodeCollector{}
+	c := &tableAndFuncCollector{}
 	transform.Walk(c, n)
-	if len(c.tables) == 0 {
-		return false
-	}
+
+	hasDataTable := false
 	for _, tn := range c.tables {
 		switch tn.Database().Name() {
 		case "mysql", "information_schema", "performance_schema", "sys":
 			return false
-		case "":
+		}
+		switch tn.UnderlyingTable().(type) {
+		case *catalog.Table, *catalog.IndexedTable:
+			hasDataTable = true
+		}
+	}
+	if !hasDataTable {
+		return false
+	}
+
+	for _, fe := range c.functions {
+		if _, ok := fe.(*function.Database); ok {
 			return false
 		}
 	}
 	return true
 }
 
-type tableNodeCollector struct {
-	tables []sql.TableNode
+type tableAndFuncCollector struct {
+	functions []sql.FunctionExpression
+	tables    []sql.TableNode
 }
 
-func (c *tableNodeCollector) Visit(n sql.Node) transform.Visitor {
+type exprVisitor tableAndFuncCollector
+
+func (v *exprVisitor) Visit(expr sql.Expression) sql.Visitor {
+	if expr == nil {
+		return nil
+	} else if fe, ok := expr.(sql.FunctionExpression); ok {
+		v.functions = append(v.functions, fe)
+	}
+
+	// Visit subquery nodes to collect any nested table references
+	if en, ok := expr.(sql.ExpressionWithNodes); ok {
+		for _, child := range en.NodeChildren() {
+			transform.Walk((*tableAndFuncCollector)(v), child)
+		}
+	}
+
+	return v
+}
+
+func (c *tableAndFuncCollector) Visit(n sql.Node) transform.Visitor {
 	if n == nil {
 		return nil
 	} else if tn, ok := n.(sql.TableNode); ok {
 		c.tables = append(c.tables, tn)
 	}
+
+	// Visit expressions to find functions e.g. database() and walk subquery nodes to collect any nested table references
+	if en, ok := n.(sql.Expressioner); ok {
+		for _, e := range en.Expressions() {
+			sql.Walk((*exprVisitor)(c), e)
+		}
+	}
+
 	return c
 }

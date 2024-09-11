@@ -99,13 +99,14 @@ func TestDebugHarness(t *testing.T) {
 }
 
 func TestIsPureDataQuery(t *testing.T) {
-	harness := NewDefaultDuckHarness()
+	harness := harness.NewDefaultDuckHarness()
 	harness.Setup(
 		setup.MydbData,
 		[]setup.SetupScript{
 			{
 				"CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(255))",
 				"CREATE table xy (x int primary key, y int, unique index y_idx(y));",
+				"CREATE view myview as select * from users",
 			},
 		})
 	ctx := enginetest.NewContext(harness)
@@ -131,21 +132,31 @@ func TestIsPureDataQuery(t *testing.T) {
 			query:    "SELECT DATABASE()",
 			expected: false,
 		},
-		// {
-		// 	name:     "Query with subquery from system table",
-		// 	query:    "SELECT u.name, (SELECT COUNT(*) FROM mysql.user) FROM users u",
-		// 	expected: false,
-		// },
+		{
+			name:     "Query with subquery from system table",
+			query:    "SELECT u.name, (SELECT COUNT(*) FROM mysql.user) FROM users u",
+			expected: false,
+		},
 		{
 			name:     "Query from information_schema",
 			query:    "SELECT * FROM information_schema.tables",
 			expected: false,
 		},
-		// {
-		// 	name:     "Query with subquery",
-		// 	query:    "select * from xy where x in (select 1 having false);",
-		// 	expected: true,
-		// },
+		{
+			name:     "Query with subquery",
+			query:    "select * from xy where x in (select 1 having false);",
+			expected: true,
+		},
+		{
+			name:     "Date parse query",
+			query:    "SELECT STR_TO_DATE('Jan 3, 2000', '%b %e, %Y')",
+			expected: false,
+		},
+		{
+			name:     "View query",
+			query:    "SELECT * FROM myview WHERE id = 1",
+			expected: true,
+		},
 	}
 	for _, tt := range tests {
 		analyzed, err := engine.AnalyzeQuery(ctx, tt.query)
@@ -381,7 +392,6 @@ var (
 		"DESCRIBE_keyless",
 		"SHOW_COLUMNS_FROM_keyless",
 		"SHOW_FULL_COLUMNS_FROM_keyless",
-		"select * from xy where x in (select 1 having false);",
 		"select_now()_=_sysdate(),_sleep(0.1),_now(6)_<_sysdate(6);",
 	}
 
