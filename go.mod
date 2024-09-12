@@ -1,15 +1,14 @@
 module github.com/apecloud/myduckserver
 
-go 1.22.4
+go 1.23.1
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Shopify/toxiproxy/v2 v2.9.0
 	github.com/dolthub/go-mysql-server v0.18.2-0.20240815142344-761713e36043
 	github.com/dolthub/vitess v0.0.0-20240807181005-71d735078e24
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jmoiron/sqlx v1.4.0
-	github.com/marcboeker/go-duckdb v1.7.1
+	github.com/marcboeker/go-duckdb v1.8.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/rs/zerolog v1.33.0
 	github.com/shopspring/decimal v1.3.1
@@ -21,6 +20,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
 	github.com/apache/arrow/go/v17 v17.0.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
