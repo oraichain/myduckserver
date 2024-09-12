@@ -46,7 +46,7 @@ jobs:
       run: go test -v -cover ./charset ./transpiler ./backend ./harness
 
     - name: Test Query Engine
-      run: go test -v -cover --timeout 300s .
+      run: go test -v -cover --timeout 600s .
 
     - name: Test Binlog Replication
       run: go test -v -p 1 --timeout 360s ./binlogreplication

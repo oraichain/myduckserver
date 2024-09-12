@@ -6,14 +6,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/apecloud/myduckserver/adapter"
 	"github.com/dolthub/go-mysql-server/sql"
 )
 
 type Database struct {
-	mu          *sync.RWMutex
-	name        string
-	storage     *stdsql.DB
-	catalogName string
+	mu      *sync.RWMutex
+	catalog string
+	name    string
 }
 
 var _ sql.Database = (*Database)(nil)
@@ -24,12 +24,11 @@ var _ sql.ViewDatabase = (*Database)(nil)
 var _ sql.TriggerDatabase = (*Database)(nil)
 var _ sql.CollatedDatabase = (*Database)(nil)
 
-func NewDatabase(name string, storage *stdsql.DB, catalogName string) *Database {
+func NewDatabase(name string, catalogName string) *Database {
 	return &Database{
-		mu:          &sync.RWMutex{},
-		name:        name,
-		storage:     storage,
-		catalogName: catalogName,
+		mu:      &sync.RWMutex{},
+		name:    name,
+		catalog: catalogName,
 	}
 }
 
@@ -38,7 +37,7 @@ func (d *Database) GetTableNames(ctx *sql.Context) ([]string, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	tbls, err := d.tablesInsensitive()
+	tbls, err := d.tablesInsensitive(ctx, "%")
 	if err != nil {
 		return nil, err
 	}
@@ -55,31 +54,49 @@ func (d *Database) GetTableInsensitive(ctx *sql.Context, tblName string) (sql.Ta
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	tbls, err := d.tablesInsensitive()
+	tbls, err := d.tablesInsensitive(ctx, tblName)
 	if err != nil {
 		return nil, false, err
 	}
 
-	tbl, ok := tbls[strings.ToLower(tblName)]
-	return tbl, ok, nil
+	if len(tbls) == 0 {
+		return nil, false, nil
+	}
+	return tbls[0], true, nil
 }
 
-func (d *Database) tablesInsensitive() (map[string]sql.Table, error) {
-	rows, err := d.storage.Query("SELECT DISTINCT table_name, comment FROM duckdb_tables() where database_name = ? and schema_name = ?", d.catalogName, d.name)
+func (d *Database) tablesInsensitive(ctx *sql.Context, pattern string) ([]*Table, error) {
+	tables, err := d.findTables(ctx, pattern)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tables {
+		t.WithSchema(ctx)
+	}
+	return tables, nil
+}
+
+func (d *Database) findTables(ctx *sql.Context, pattern string) ([]*Table, error) {
+	rows, err := adapter.QueryCatalogContext(ctx, "SELECT DISTINCT table_name, comment FROM duckdb_tables() where database_name = ? and schema_name = ? and table_name ILIKE ?", d.catalog, d.name, pattern)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
 	}
 	defer rows.Close()
 
-	tbls := make(map[string]sql.Table)
+	var tbls []*Table
 	for rows.Next() {
 		var tblName string
 		var comment stdsql.NullString
 		if err := rows.Scan(&tblName, &comment); err != nil {
 			return nil, ErrDuckDB.New(err)
 		}
-		tbls[strings.ToLower(tblName)] = NewTable(tblName, d).WithComment(DecodeComment[any](comment.String))
+		t := NewTable(tblName, d).WithComment(DecodeComment[any](comment.String))
+		tbls = append(tbls, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, ErrDuckDB.New(err)
+	}
+
 	return tbls, nil
 }
 
@@ -115,14 +132,14 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 
 		if col.Comment != "" || typ.mysql.Name != "" {
 			columnCommentSQLs = append(columnCommentSQLs,
-				fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(d.catalogName, d.name, name, col.Name),
+				fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(d.catalog, d.name, name, col.Name),
 					NewCommentWithMeta[MySQLType](col.Comment, typ.mysql).Encode()))
 		}
 	}
 
 	var sqlsBuild strings.Builder
 
-	sqlsBuild.WriteString(fmt.Sprintf(`CREATE TABLE %s (%s`, FullTableName(d.catalogName, d.name, name), strings.Join(columns, ", ")))
+	sqlsBuild.WriteString(fmt.Sprintf(`CREATE TABLE %s (%s`, FullTableName(d.catalog, d.name, name), strings.Join(columns, ", ")))
 
 	var primaryKeys []string
 	for pkord := range schema.PkOrdinals {
@@ -137,7 +154,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 
 	// Add comment to the table
 	if comment != "" {
-		sqlsBuild.WriteString(fmt.Sprintf("; COMMENT ON TABLE %s IS '%s'", FullTableName(d.catalogName, d.name, name), NewComment[any](comment).Encode()))
+		sqlsBuild.WriteString(fmt.Sprintf("; COMMENT ON TABLE %s IS '%s'", FullTableName(d.catalog, d.name, name), NewComment[any](comment).Encode()))
 	}
 
 	// Add column comments
@@ -146,7 +163,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		sqlsBuild.WriteString(s)
 	}
 
-	_, err := d.storage.Exec(sqlsBuild.String())
+	_, err := adapter.ExecContext(ctx, sqlsBuild.String())
 	if err != nil {
 		if IsDuckDBTableAlreadyExistsError(err) {
 			return sql.ErrTableAlreadyExists.New(name)
@@ -164,7 +181,7 @@ func (d *Database) DropTable(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalogName, d.name, name)))
+	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalog, d.name, name)))
 
 	if err != nil {
 		if IsDuckDBTableNotFoundError(err) {
@@ -180,7 +197,7 @@ func (d *Database) RenameTable(ctx *sql.Context, oldName string, newName string)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO "%s"`, FullTableName(d.catalogName, d.name, oldName), newName))
+	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s RENAME TO "%s"`, FullTableName(d.catalog, d.name, oldName), newName))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -188,7 +205,7 @@ func (d *Database) RenameTable(ctx *sql.Context, oldName string, newName string)
 }
 
 // extractViewDefinitions is a helper function to extract view definitions from DuckDB
-func (d *Database) extractViewDefinitions(schemaName string, viewName string) ([]sql.ViewDefinition, error) {
+func (d *Database) extractViewDefinitions(ctx *sql.Context, schemaName string, viewName string) ([]sql.ViewDefinition, error) {
 	query := `
 		SELECT view_name, sql
 		FROM duckdb_views()
@@ -201,7 +218,7 @@ func (d *Database) extractViewDefinitions(schemaName string, viewName string) ([
 		args = append(args, viewName)
 	}
 
-	rows, err := d.storage.Query(query, args...)
+	rows, err := adapter.QueryCatalogContext(ctx, query, args...)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
 	}
@@ -229,7 +246,7 @@ func (d *Database) AllViews(ctx *sql.Context) ([]sql.ViewDefinition, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	return d.extractViewDefinitions(d.name, "")
+	return d.extractViewDefinitions(ctx, d.name, "")
 }
 
 // GetViewDefinition implements sql.ViewDatabase.
@@ -237,7 +254,7 @@ func (d *Database) GetViewDefinition(ctx *sql.Context, viewName string) (sql.Vie
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	views, err := d.extractViewDefinitions(d.name, viewName)
+	views, err := d.extractViewDefinitions(ctx, d.name, viewName)
 	if err != nil {
 		return sql.ViewDefinition{}, false, err
 	}
@@ -254,7 +271,7 @@ func (d *Database) CreateView(ctx *sql.Context, name string, selectStatement str
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`USE %s; CREATE VIEW "%s" AS %s`, FullSchemaName(d.catalogName, d.name), name, selectStatement))
+	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`USE %s; CREATE VIEW "%s" AS %s`, FullSchemaName(d.catalog, d.name), name, selectStatement))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -266,7 +283,7 @@ func (d *Database) DropView(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.storage.Exec(fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalogName, d.name), name))
+	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalog, d.name), name))
 	if err != nil {
 		if IsDuckDBViewNotFoundError(err) {
 			return sql.ErrViewDoesNotExist.New(name)

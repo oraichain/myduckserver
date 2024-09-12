@@ -57,3 +57,14 @@ func DecodeCreateindex(createIndexSQL string) []string {
 	}
 	return []string{}
 }
+
+func QuoteIdentifierANSI(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func ConnectIdentifiersANSI(identifiers ...string) string {
+	for i, id := range identifiers {
+		identifiers[i] = QuoteIdentifierANSI(id)
+	}
+	return strings.Join(identifiers, ".")
+}

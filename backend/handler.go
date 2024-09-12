@@ -16,40 +16,31 @@ package backend
 
 import (
 	"context"
-	stdsql "database/sql"
 	"fmt"
 
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/vitess/go/mysql"
-	"github.com/sirupsen/logrus"
 )
 
 type MyHandler struct {
 	*server.Handler
-	builder *DuckBuilder
+	pool *ConnectionPool
 }
 
 func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
-	entry, ok := h.builder.conns.Load(c.ConnectionID)
-	if ok {
-		conn := entry.(*stdsql.Conn)
-		if err := conn.Close(); err != nil {
-			logrus.Warn("Failed to close connection:", err)
-		}
-		h.builder.conns.Delete(c.ConnectionID)
-	}
+	h.pool.CloseConn(c.ConnectionID)
 	h.Handler.ConnectionClosed(c)
 }
 
 func (h *MyHandler) ComInitDB(c *mysql.Conn, schemaName string) error {
-	_, err := h.builder.GetConn(context.Background(), c.ConnectionID, schemaName)
+	_, err := h.pool.GetConnForSchema(context.Background(), c.ConnectionID, schemaName)
 	if err != nil {
 		return err
 	}
 	return h.Handler.ComInitDB(c, schemaName)
 }
 
-func WrapHandler(b *DuckBuilder) server.HandlerWrapper {
+func WrapHandler(pool *ConnectionPool) server.HandlerWrapper {
 	return func(h mysql.Handler) (mysql.Handler, error) {
 		handler, ok := h.(*server.Handler)
 		if !ok {
@@ -58,7 +49,7 @@ func WrapHandler(b *DuckBuilder) server.HandlerWrapper {
 
 		return &MyHandler{
 			Handler: handler,
-			builder: b,
+			pool:    pool,
 		}, nil
 	}
 }

@@ -69,22 +69,24 @@ func main() {
 	}
 	defer provider.Close()
 
+	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Storage())
+
 	engine := sqle.NewDefault(provider)
 
-	builder := backend.NewDuckBuilder(engine.Analyzer.ExecBuilder, provider.Storage(), provider.CatalogName())
+	builder := backend.NewDuckBuilder(engine.Analyzer.ExecBuilder, pool)
 	engine.Analyzer.ExecBuilder = builder
 
 	if err := setPersister(provider, engine); err != nil {
 		logrus.Fatalln("Failed to set the persister:", err)
 	}
 
-	registerReplicaController(provider, engine, provider.Storage())
+	registerReplicaController(provider, engine, pool)
 
 	config := server.Config{
 		Protocol: "tcp",
 		Address:  fmt.Sprintf("%s:%d", address, port),
 	}
-	s, err := server.NewServerWithHandler(config, engine, backend.NewSessionBuilder(provider), nil, backend.WrapHandler(builder))
+	s, err := server.NewServerWithHandler(config, engine, backend.NewSessionBuilder(provider, pool), nil, backend.WrapHandler(pool))
 	if err != nil {
 		panic(err)
 	}

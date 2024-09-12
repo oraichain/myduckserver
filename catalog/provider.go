@@ -12,6 +12,7 @@ import (
 	"github.com/dolthub/go-mysql-server/sql"
 	_ "github.com/marcboeker/go-duckdb"
 
+	"github.com/apecloud/myduckserver/adapter"
 	"github.com/apecloud/myduckserver/configuration"
 )
 
@@ -91,7 +92,7 @@ func (prov *DatabaseProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	rows, err := prov.storage.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", prov.catalogName)
+	rows, err := adapter.QueryCatalogContext(ctx, "SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", prov.catalogName)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
@@ -109,7 +110,7 @@ func (prov *DatabaseProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 			continue
 		}
 
-		all = append(all, NewDatabase(schemaName, prov.storage, prov.catalogName))
+		all = append(all, NewDatabase(schemaName, prov.catalogName))
 	}
 
 	sort.Slice(all, func(i, j int) bool {
@@ -124,13 +125,13 @@ func (prov *DatabaseProvider) Database(ctx *sql.Context, name string) (sql.Datab
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(prov.storage, prov.catalogName, name)
+	ok, err := hasDatabase(ctx, prov.catalogName, name)
 	if err != nil {
 		return nil, err
 	}
 
 	if ok {
-		return NewDatabase(name, prov.storage, prov.catalogName), nil
+		return NewDatabase(name, prov.catalogName), nil
 	}
 	return nil, sql.ErrDatabaseNotFound.New(name)
 }
@@ -140,7 +141,7 @@ func (prov *DatabaseProvider) HasDatabase(ctx *sql.Context, name string) bool {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(prov.storage, prov.catalogName, name)
+	ok, err := hasDatabase(ctx, prov.catalogName, name)
 	if err != nil {
 		panic(err)
 	}
@@ -148,8 +149,8 @@ func (prov *DatabaseProvider) HasDatabase(ctx *sql.Context, name string) bool {
 	return ok
 }
 
-func hasDatabase(engine *stdsql.DB, dstName string, name string) (bool, error) {
-	rows, err := engine.Query("SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ? AND schema_name = ?", dstName, strings.ToLower(name))
+func hasDatabase(ctx *sql.Context, catalog string, name string) (bool, error) {
+	rows, err := adapter.QueryCatalogContext(ctx, "SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ? AND schema_name ILIKE ?", catalog, name)
 	if err != nil {
 		return false, ErrDuckDB.New(err)
 	}
@@ -162,7 +163,7 @@ func (prov *DatabaseProvider) CreateDatabase(ctx *sql.Context, name string) erro
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := prov.storage.Exec(fmt.Sprintf(`CREATE SCHEMA %s`, FullSchemaName(prov.catalogName, name)))
+	_, err := adapter.ExecCatalogContext(ctx, fmt.Sprintf(`CREATE SCHEMA %s`, FullSchemaName(prov.catalogName, name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -175,7 +176,7 @@ func (prov *DatabaseProvider) DropDatabase(ctx *sql.Context, name string) error 
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := prov.storage.Exec(fmt.Sprintf(`DROP SCHEMA %s CASCADE`, FullSchemaName(prov.catalogName, name)))
+	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`DROP SCHEMA %s CASCADE`, FullSchemaName(prov.catalogName, name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}

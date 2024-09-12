@@ -26,22 +26,23 @@ import (
 	"github.com/marcboeker/go-duckdb"
 	"github.com/sirupsen/logrus"
 
+	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/binlogreplication"
 	"github.com/apecloud/myduckserver/catalog"
 )
 
 // registerReplicaController registers the replica controller into the engine
 // to handle the replication commands, such as START REPLICA, STOP REPLICA, etc.
-func registerReplicaController(provider *catalog.DatabaseProvider, engine *sqle.Engine, db *stdsql.DB) {
+func registerReplicaController(provider *catalog.DatabaseProvider, engine *sqle.Engine, pool *backend.ConnectionPool) {
 	replica := binlogreplication.MyBinlogReplicaController
 	replica.SetEngine(engine)
 
-	session := memory.NewSession(sql.NewBaseSession(), provider)
+	session := backend.NewSession(memory.NewSession(sql.NewBaseSession(), provider), provider, pool)
 	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
 	ctx.SetCurrentDatabase("mysql")
 	replica.SetExecutionContext(ctx)
 
-	replica.SetTableWriterProvider(&tableWriterProvider{db: db})
+	replica.SetTableWriterProvider(&tableWriterProvider{pool})
 
 	engine.Analyzer.Catalog.BinlogReplicaController = binlogreplication.MyBinlogReplicaController
 
@@ -52,7 +53,7 @@ func registerReplicaController(provider *catalog.DatabaseProvider, engine *sqle.
 }
 
 type tableWriterProvider struct {
-	db *stdsql.DB
+	pool *backend.ConnectionPool
 }
 
 var _ binlogreplication.TableWriterProvider = &tableWriterProvider{}
@@ -151,7 +152,7 @@ func (twp *tableWriterProvider) newTableUpdater(
 	identifyColumns, dataColumns mysql.Bitmap,
 	eventType binlogreplication.EventType,
 ) (*tableUpdater, error) {
-	tx, err := twp.db.BeginTx(ctx.Context, nil)
+	tx, err := twp.pool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +223,7 @@ func (twp *tableWriterProvider) newTableUpdater(
 	}
 
 	return &tableUpdater{
-		db:         twp.db,
+		pool:       twp.pool,
 		tx:         tx,
 		stmt:       stmt,
 		replace:    replace,
@@ -330,7 +331,7 @@ func buildUpdateTemplate(tableName string, columnCount int, schema sql.Schema, p
 }
 
 type tableUpdater struct {
-	db         *stdsql.DB
+	pool       *backend.ConnectionPool
 	tx         *stdsql.Tx
 	stmt       *stdsql.Stmt
 	replace    bool
@@ -388,7 +389,7 @@ func (tu *tableUpdater) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []
 			return err
 		}
 
-		tu.tx, err = tu.db.BeginTx(ctx.Context, nil)
+		tu.tx, err = tu.pool.BeginTx(ctx.Context, nil)
 		if err != nil {
 			return err
 		}

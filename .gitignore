@@ -6,3 +6,5 @@ myduckserver
 .replica/
 *.txt
 *.out
+*.test
+.vscode/

@@ -94,7 +94,6 @@ func TestIsPureDataQuery(t *testing.T) {
 				"CREATE view myview as select * from users",
 			},
 		})
-	ctx := enginetest.NewContext(harness)
 	engine, err := harness.NewEngine(t)
 	require.NoError(t, err)
 	tests := []struct {
@@ -144,6 +143,7 @@ func TestIsPureDataQuery(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
+		ctx := enginetest.NewContext(harness)
 		analyzed, err := engine.AnalyzeQuery(ctx, tt.query)
 		require.NoError(t, err)
 		result := backend.IsPureDataQuery(analyzed)
@@ -954,18 +954,28 @@ func TestSpatialInsertInto(t *testing.T) {
 }
 
 func TestLoadData(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestLoadData(t, NewDefaultDuckHarness())
+	harness := NewDefaultDuckHarness()
+	harness.QueriesToSkip(
+		"create table loadtable(pk int primary key, check (pk > 1))",
+		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
+		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
+		"LOAD DATA INFILE './testdata/test2.csv' IGNORE INTO TABLE loadtable FIELDS TERMINATED BY ',' IGNORE 1 LINES",
+		"LOAD DATA INFILE './testdata/test2.csv' REPLACE INTO TABLE loadtable FIELDS TERMINATED BY ',' IGNORE 1 LINES",
+	)
+	enginetest.TestLoadData(t, harness)
 }
 
 func TestLoadDataErrors(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestLoadDataErrors(t, NewDefaultDuckHarness())
+	harness := NewDefaultDuckHarness()
+	harness.QueriesToSkip(
+		"create table loadtable(pk int primary key, c1 varchar(10))",
+	)
+	enginetest.TestLoadDataErrors(t, harness)
 }
 
 func TestLoadDataFailing(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestLoadDataFailing(t, NewDefaultDuckHarness())
+	harness := NewDefaultDuckHarness()
+	enginetest.TestLoadDataFailing(t, harness)
 }
 
 func TestSelectIntoFile(t *testing.T) {
@@ -1568,7 +1578,7 @@ func TestPersist(t *testing.T) {
 	newSess := func(_ *sql.Context) sql.PersistableSession {
 		ctx := harness.NewSession()
 		persistedGlobals := memory.GlobalsMap{}
-		memSession := ctx.Session.(*memory.Session).SetGlobals(persistedGlobals)
+		memSession := ctx.Session.(*backend.Session).SetGlobals(persistedGlobals)
 		return memSession
 	}
 	enginetest.TestPersist(t, harness, newSess)
@@ -1585,7 +1595,7 @@ func TestValidateSession(t *testing.T) {
 		t.Skip("It depends on ValidateSession() method call on context")
 	}
 	newSess := func(ctx *sql.Context) sql.PersistableSession {
-		memSession := ctx.Session.(*memory.Session)
+		memSession := ctx.Session.(*backend.Session)
 		memSession.SetValidationCallback(incrementValidateCb)
 		return memSession
 	}
