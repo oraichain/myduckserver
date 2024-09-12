@@ -50,21 +50,6 @@ type indexBehaviorTestParams struct {
 	nativeIndexes     bool
 }
 
-var numPartitionsVals = []int{
-	1,
-	testNumPartitions,
-}
-var indexBehaviors = []*indexBehaviorTestParams{
-	{"none", nil, false},
-	{"mergableIndexes", mergableIndexDriver, false},
-	{"nativeIndexes", nil, true},
-	{"nativeAndMergable", mergableIndexDriver, true},
-}
-var parallelVals = []int{
-	1,
-	2,
-}
-
 func TestDebugHarness(t *testing.T) {
 	t.Skip("only used for debugging")
 
@@ -166,14 +151,70 @@ func TestIsPureDataQuery(t *testing.T) {
 	}
 }
 
-var (
-	notApplicableQueries = []string{
+var numPartitionsVals = []int{
+	1,
+	testNumPartitions,
+}
+var indexBehaviors = []*indexBehaviorTestParams{
+	{"none", nil, false},
+	{"mergableIndexes", mergableIndexDriver, false},
+	{"nativeIndexes", nil, true},
+	{"nativeAndMergable", mergableIndexDriver, true},
+}
+var parallelVals = []int{
+	1,
+	2,
+}
+
+// TestQueries tests the given queries on an engine under a variety of circumstances:
+// 1) Partitioned tables / non partitioned tables
+// 2) Mergeable / unmergeable / native / no indexes
+// 3) Parallelism on / off
+func TestQueries(t *testing.T) {
+	t.Skip("wait for fix")
+	for _, numPartitions := range numPartitionsVals {
+		for _, indexBehavior := range indexBehaviors {
+			for _, parallelism := range parallelVals {
+				if parallelism == 1 && numPartitions == testNumPartitions && indexBehavior.name == "nativeIndexes" {
+					// This case is covered by TestQueriesSimple
+					continue
+				}
+				testName := fmt.Sprintf("partitions=%d,indexes=%v,parallelism=%v", numPartitions, indexBehavior.name, parallelism)
+				harness := NewDuckHarness(testName, parallelism, numPartitions, indexBehavior.nativeIndexes, indexBehavior.driverInitializer)
+
+				harness.SetupScriptsToSkip(
+					setup.Fk_tblData, // Skip foreign key setup (not supported)
+				)
+
+				t.Run(testName, func(t *testing.T) {
+					enginetest.TestQueries(t, harness)
+				})
+			}
+		}
+	}
+}
+
+// TestQueriesPreparedSimple runs the canonical test queries against a single threaded index enabled harness.
+func TestQueriesPreparedSimple(t *testing.T) {
+	t.Skip("wait for fix")
+	harness := NewDefaultDuckHarness()
+	if harness.IsUsingServer() {
+		t.Skip("issue: https://github.com/dolthub/dolt/issues/6904 and https://github.com/dolthub/dolt/issues/6901")
+	}
+	enginetest.TestQueriesPrepared(t, harness)
+}
+
+// TestQueriesSimple runs the canonical test queries against a single threaded index enabled harness.
+func TestQueriesSimple(t *testing.T) {
+	harness := NewDefaultDuckHarness()
+
+	notApplicableQueries := []string{
 		"SELECT_*_FROM_mytable_t0_INNER_JOIN_mytable_t1_ON_(t1.i_IN_(((true)%(''))));",
 		"SELECT_count(*)_from_mytable_WHERE_(i_IN_(-''));",
 		"select_sum('abc')_from_mytable",
 	}
 
-	waitForFixQueries = []string{
+	waitForFixQueries := []string{
 		"select_*_from_(select_i,_i2_from_niltable)_a(x,y)_union_select_*_from_(select_1,_NULL)_b(x,y)_union_select_*_from_(select_i,_i2_from_niltable)_c(x,y)",
 		"SELECT_SUM(i),_i_FROM_mytable_GROUP_BY_i_ORDER_BY_1+SUM(i)_ASC",
 		"SELECT_SUM(i)_as_sum,_i_FROM_mytable_GROUP_BY_i_ORDER_BY_1+SUM(i)_ASC",
@@ -203,7 +244,6 @@ var (
 		"select_floor(i),_avg(char_length(s))_from_mytable_mt_group_by_1_order_by_floor(i)_desc",
 		"select_format(i,_3)_from_mytable;",
 		"select_format(i,_3,_'da_dk')_from_mytable;",
-		"SELECT_JSON_KEYS(c3)_FROM_jsontable",
 		"SELECT_JSON_OVERLAPS(c3,_'{\"a\":_2,_\"d\":_2}')_FROM_jsontable",
 		"SELECT_JSON_MERGE(c3,_'{\"a\":_1}')_FROM_jsontable",
 		"SELECT_JSON_MERGE_PRESERVE(c3,_'{\"a\":_1}')_FROM_jsontable",
@@ -342,7 +382,6 @@ var (
 		"SELECT_i_FROM_mytable_mt________WHERE_(SELECT_i_FROM_mytable_where_i_=_mt.i)_IS_NOT_NULL________AND_(SELECT_i2_FROM_othertable_where_i2_=_i)_IS_NOT_NULL________ORDER_BY_i",
 		"SELECT_sum(i)_as_isum,_s_FROM_mytable_GROUP_BY_i_ORDER_BY_isum_ASC_LIMIT_0,_200",
 		"SELECT_(SELECT_i_FROM_mytable_ORDER_BY_i_ASC_LIMIT_1)_AS_x",
-		"SELECT_(SELECT_s_FROM_mytable_ORDER_BY_i_ASC_LIMIT_1)_AS_x",
 		"SELECT_pk,_(SELECT_concat(pk,_pk)_FROM_one_pk_WHERE_pk_<_opk.pk_ORDER_BY_1_DESC_LIMIT_1)_as_strpk_FROM_one_pk_opk_having_strpk_>_\"0\"_ORDER_BY_2",
 		"SELECT_pk,_(SELECT_max(pk)_FROM_one_pk_WHERE_pk_<_opk.pk)_AS_x_FROM_one_pk_opk_GROUP_BY_x_ORDER_BY_x",
 		"SELECT_pk,_(SELECT_max(pk)_FROM_one_pk_WHERE_pk_<_opk.pk)_AS_x_______FROM_one_pk_opk_WHERE_(SELECT_max(pk)_FROM_one_pk_WHERE_pk_<_opk.pk)_>_0_______GROUP_BY_x_ORDER_BY_x",
@@ -395,60 +434,14 @@ var (
 		"select_now()_=_sysdate(),_sleep(0.1),_now(6)_<_sysdate(6);",
 	}
 
-	// cases lead to panics
-	// "SELECT_JSON_KEYS(c3)_FROM_jsontable",
-	// "SELECT_(SELECT_s_FROM_mytable_ORDER_BY_i_ASC_LIMIT_1)_AS_x",
-
-)
-
-// TestQueries tests the given queries on an engine under a variety of circumstances:
-// 1) Partitioned tables / non partitioned tables
-// 2) Mergeable / unmergeable / native / no indexes
-// 3) Parallelism on / off
-func TestQueries(t *testing.T) {
-	t.Skip("wait for fix")
-	for _, numPartitions := range numPartitionsVals {
-		for _, indexBehavior := range indexBehaviors {
-			for _, parallelism := range parallelVals {
-				if parallelism == 1 && numPartitions == testNumPartitions && indexBehavior.name == "nativeIndexes" {
-					// This case is covered by TestQueriesSimple
-					continue
-				}
-				testName := fmt.Sprintf("partitions=%d,indexes=%v,parallelism=%v", numPartitions, indexBehavior.name, parallelism)
-				harness := NewDuckHarness(testName, parallelism, numPartitions, indexBehavior.nativeIndexes, indexBehavior.driverInitializer)
-
-				harness.SetupScriptsToSkip(
-					setup.Fk_tblData,     // Skip foreign key setup (not supported)
-					setup.TypestableData, // Skip enum/set type setup (not supported)
-				)
-
-				harness.QueriesToSkip(notApplicableQueries...)
-				harness.QueriesToSkip(waitForFixQueries...)
-
-				t.Run(testName, func(t *testing.T) {
-					enginetest.TestQueries(t, harness)
-				})
-			}
-		}
+	panicQueries := []string{
+		"SELECT_JSON_KEYS(c3)_FROM_jsontable",
+		"SELECT_(SELECT_s_FROM_mytable_ORDER_BY_i_ASC_LIMIT_1)_AS_x",
 	}
-}
-
-// TestQueriesPreparedSimple runs the canonical test queries against a single threaded index enabled harness.
-func TestQueriesPreparedSimple(t *testing.T) {
-	t.Skip("wait for fix")
-	harness := NewDefaultDuckHarness()
-	if harness.IsUsingServer() {
-		t.Skip("issue: https://github.com/dolthub/dolt/issues/6904 and https://github.com/dolthub/dolt/issues/6901")
-	}
-	enginetest.TestQueriesPrepared(t, harness)
-}
-
-// TestQueriesSimple runs the canonical test queries against a single threaded index enabled harness.
-func TestQueriesSimple(t *testing.T) {
-	harness := NewDefaultDuckHarness()
 
 	harness.QueriesToSkip(notApplicableQueries...)
 	harness.QueriesToSkip(waitForFixQueries...)
+	harness.QueriesToSkip(panicQueries...)
 	enginetest.TestQueries(t, harness)
 }
 
@@ -1137,17 +1130,12 @@ func TestTriggersErrors(t *testing.T) {
 
 func TestCreateTable(t *testing.T) {
 
+	// Generated by dev/extract_queries_to_skip.py
 	waitForFixQueries := []string{
 		"CREATE_TABLE_t1_(a_INTEGER,_create_time_timestamp(6)_NOT_NULL_DEFAULT_NOW(6),_primary_key_(a))",
 		"CREATE_TABLE_t1_(a_INTEGER,_create_time_timestamp(6)_NOT_NULL_DEFAULT_NOW(6),_primary_key_(a))",
-		"CREATE_TABLE_t1_LIKE_mytable",
-		"CREATE_TABLE_t1_LIKE_mytable",
 		"CREATE_TABLE_t1_(____pk_bigint_primary_key,____v1_bigint_default_(2)_comment_'hi_there',____index_idx_v1_(v1)_comment_'index_here'____)",
 		"CREATE_TABLE_t1_(____pk_bigint_primary_key,____v1_bigint_default_(2)_comment_'hi_there',____index_idx_v1_(v1)_comment_'index_here'____)",
-		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE)",
-		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE)",
-		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE_KEY)",
-		"CREATE_TABLE_t1_(a_INTEGER_NOT_NULL_PRIMARY_KEY,_b_VARCHAR(10)_UNIQUE_KEY)",
 		"CREATE_TABLE_t1_SELECT_*_from_mytable",
 		"CREATE_TABLE_t1_SELECT_*_from_mytable",
 		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment_unique)",
@@ -1189,7 +1177,6 @@ func TestCreateTable(t *testing.T) {
 		"display_width_for_numeric_types",
 		"SHOW_FULL_FIELDS_FROM_numericDisplayWidthTest;",
 		"Validate_that_CREATE_LIKE_preserves_checks",
-		"CREATE TABLE t1 (pk int primary key, test_score int, height int CHECK (height < 10) , CONSTRAINT mycheck CHECK (test_score >= 50))",
 		"datetime_precision",
 		"CREATE_TABLE_tt_(pk_int_primary_key,_d_datetime(6)_default_current_timestamp(6))",
 		"Identifier_lengths",
@@ -1200,14 +1187,7 @@ func TestCreateTable(t *testing.T) {
 		"show_create_table_t2",
 		"show_create_table_t3",
 		"show_create_table_t4",
-		"if_not_exists_option_blocks",
-		"show_create_table_t1",
-		"show_create_table_t1#01",
-		"show_create_table_t1#02",
-		"show_create_table_t1#03",
-		"show_create_table_t1#04",
 		"create_table_with_select_preserves_default",
-		"create table a (i int primary key, j int default 100);",
 		"create_table_t1_select_*_from_a;",
 		"create_table_t2_select_j_from_a;",
 		"create_table_t3_select_j_as_i_from_a;",
@@ -1238,16 +1218,22 @@ func TestCreateTable(t *testing.T) {
 		"show_create_table_t2",
 		"insert_into_t2_values_(null),_(null),_(null)",
 		"select_*_from_t2",
-		"CREATE_TABLE_with_multiple_unnamed_indexes",
-		"create_table_with_blob_column_with_null_default",
-		"create_table_like_works_and_can_have_keys_removed",
 	}
 
+	// Patch auto-generated queries that are known to fail
+	waitForFixQueries = append(waitForFixQueries, []string{
+		"CREATE TABLE t1 (pk int primary key, test_score int, height int CHECK (height < 10) , CONSTRAINT mycheck CHECK (test_score >= 50))",
+		"create table a (i int primary key, j int default 100);", // skip the case "create table with select preserves default" since there is no support for CREATE TABLE SELECT
+	}...)
+
+	// The following queries are known to panic the engine
 	panicQueries := []string{
 		"create_table_t7_select_(select_j_from_a)_sq_from_dual;",
 		"create_table_t9_select_*_from_json_table('[{\"c1\":_1}]',_'$[*]'_columns_(c1_int_path_'$.c1'_default_'100'_on_empty))_as_jt;",
 	}
+
 	harness := NewDefaultDuckHarness()
+
 	harness.QueriesToSkip(waitForFixQueries...)
 	harness.QueriesToSkip(panicQueries...)
 	RunCreateTableTest(t, harness)
@@ -1298,6 +1284,41 @@ func RunCreateTableTest(t *testing.T, harness enginetest.Harness) {
 		}
 
 		require.Equal(t, s, testTable.Schema())
+	})
+
+	t.Run("CREATE TABLE with multiple unnamed indexes", func(t *testing.T) {
+		ctx := enginetest.NewContext(harness)
+		ctx.SetCurrentDatabase("")
+
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "CREATE TABLE mydb.t12 (a INTEGER NOT NULL PRIMARY KEY, "+
+			"b VARCHAR(10) UNIQUE, c varchar(10) UNIQUE)", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
+
+		db, err := e.EngineAnalyzer().Catalog.Database(ctx, "mydb")
+		require.NoError(t, err)
+
+		t12Table, ok, err := db.GetTableInsensitive(ctx, "t12")
+		require.NoError(t, err)
+		require.True(t, ok)
+
+		t9TableIndexable, ok := t12Table.(sql.IndexAddressableTable)
+		require.True(t, ok)
+		t9Indexes, err := t9TableIndexable.GetIndexes(ctx)
+		require.NoError(t, err)
+		uniqueCount := 0
+		for _, index := range t9Indexes {
+			if index.IsUnique() {
+				uniqueCount += 1
+			}
+		}
+
+		// We want two unique indexes to be created with unique names being generated. It is up to the integrator
+		// to decide how empty string indexes are created. Adding in the primary key gives us a result of 3.
+		require.Equal(t, 3, uniqueCount)
+
+		// Validate No Unique Index has an empty Name
+		for _, index := range t9Indexes {
+			require.True(t, index.ID() != "")
+		}
 	})
 }
 

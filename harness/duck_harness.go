@@ -97,8 +97,7 @@ func NewDuckHarness(name string, parallelism int, numTablePartitions int, useNat
 
 func NewDefaultDuckHarness() *DuckHarness {
 	return NewDuckHarness("default", 1, TestNumPartitions, true, nil).SetupScriptsToSkip(
-		setup.Fk_tblData,     // Skip foreign key setup (not supported)
-		setup.TypestableData, // Skip enum/set type setup (not supported)
+		setup.Fk_tblData, // Skip foreign key setup (not supported)
 	)
 }
 
