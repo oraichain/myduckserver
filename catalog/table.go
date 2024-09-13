@@ -82,7 +82,7 @@ func (t *Table) PartitionRows(ctx *sql.Context, _ sql.Partition) (sql.RowIter, e
 
 // Partitions implements sql.Table.
 func (t *Table) Partitions(ctx *sql.Context) (sql.PartitionIter, error) {
-	return nil, fmt.Errorf("unimplemented(Partitions) (table: %s, query: %s)", t.name, ctx.Query())
+	return sql.PartitionsToPartitionIter(), nil
 }
 
 // Schema implements sql.Table.
@@ -256,10 +256,40 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	return nil
 }
 
+type EmptyTableEditor struct {
+}
+
+// Close implements sql.RowUpdater.
+func (e *EmptyTableEditor) Close(*sql.Context) error {
+	return nil
+}
+
+// DiscardChanges implements sql.RowUpdater.
+func (e *EmptyTableEditor) DiscardChanges(ctx *sql.Context, errorEncountered error) error {
+	panic("unimplemented")
+}
+
+// StatementBegin implements sql.RowUpdater.
+func (e *EmptyTableEditor) StatementBegin(ctx *sql.Context) {
+	panic("unimplemented")
+}
+
+// StatementComplete implements sql.RowUpdater.
+func (e *EmptyTableEditor) StatementComplete(ctx *sql.Context) error {
+	panic("unimplemented")
+}
+
+// Update implements sql.RowUpdater.
+func (e *EmptyTableEditor) Update(ctx *sql.Context, old sql.Row, new sql.Row) error {
+	panic("unimplemented")
+}
+
+var _ sql.RowUpdater = (*EmptyTableEditor)(nil)
+
 // Updater implements sql.AlterableTable.
 func (t *Table) Updater(ctx *sql.Context) sql.RowUpdater {
 	// Called when altering a table’s default value. No update needed as DuckDB handles it internally.
-	return nil
+	return &EmptyTableEditor{}
 }
 
 // Inserter implements sql.InsertableTable.

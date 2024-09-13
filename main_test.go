@@ -1350,27 +1350,602 @@ func TestDropTable(t *testing.T) {
 }
 
 func TestRenameTable(t *testing.T) {
-	t.Skip("wait for fix")
+	queries.RenameTableScripts = []queries.ScriptTest{
+		{
+			Name: "simple rename table",
+			SetUpScript: []string{
+				"CREATE TABLE mytable0 (pk int primary key, mk int)",
+				"INSERT INTO mytable0 VALUES (1, 1)",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "RENAME TABLE mytable0 TO newTableName",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query:       "SELECT COUNT(*) FROM mytable0",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:    "SELECT COUNT(*) FROM newTableName",
+					Expected: []sql.Row{{1}},
+				},
+			},
+		},
+		{
+			Name: "rename multiple tables in one stmt",
+			SetUpScript: []string{
+				"CREATE TABLE othertable0 (pk int primary key, mk int)",
+				"INSERT INTO othertable0 VALUES (1, 1)",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "RENAME TABLE othertable0 to othertable2, newTableName to mytable0",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query:       "SELECT COUNT(*) FROM othertable0",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:       "SELECT COUNT(*) FROM newTableName",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:    "SELECT COUNT(*) FROM mytable0",
+					Expected: []sql.Row{{1}},
+				},
+				{
+					Query:    "SELECT COUNT(*) FROM othertable2",
+					Expected: []sql.Row{{1}},
+				},
+			},
+		},
+		{
+			Name: "error cases",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE not_exist RENAME foo",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:       "ALTER TABLE emptytable RENAME niltable",
+					ExpectedErr: sql.ErrTableAlreadyExists,
+				},
+			},
+		},
+	}
 	enginetest.TestRenameTable(t, NewDefaultDuckHarness())
 }
 
 func TestRenameColumn(t *testing.T) {
-	t.Skip("wait for fix")
+	queries.RenameColumnScripts = []queries.ScriptTest{
+		{
+			Name: "error cases",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE mytable RENAME COLUMN i2 TO iX",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable RENAME COLUMN i TO iX, RENAME COLUMN iX TO i2",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable RENAME COLUMN i TO iX, RENAME COLUMN i TO i2",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable RENAME COLUMN i TO S",
+					ExpectedErr: sql.ErrColumnExists,
+				},
+				{
+					Query:       "ALTER TABLE mytable RENAME COLUMN i TO n, RENAME COLUMN s TO N",
+					ExpectedErr: sql.ErrColumnExists,
+				},
+			},
+		},
+		{
+			Name: "simple rename column",
+			SetUpScript: []string{
+				"CREATE TABLE mytable1 (i bigint not null, s varchar(20) not null comment 'column s')",
+				"INSERT INTO mytable1 VALUES (1, 'first row')",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE mytable1 RENAME COLUMN i TO i2, RENAME COLUMN s TO s2",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable1",
+					Expected: []sql.Row{
+						{"i2", "bigint", nil, "NO", "", nil, "", "", ""},
+						{"s2", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
+					},
+				},
+				{
+					Query: "select * from mytable1 order by i2 limit 1",
+					Expected: []sql.Row{
+						{1, "first row"},
+					},
+				},
+			},
+		},
+	}
 	enginetest.TestRenameColumn(t, NewDefaultDuckHarness())
 }
 
 func TestAddColumn(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestAddColumn(t, NewDefaultDuckHarness())
+	queries.AddColumnScripts = []queries.ScriptTest{
+		{
+			Name: "column at end with default",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE mytable ADD COLUMN i2 INT COMMENT 'hello' default 42",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable",
+					// | Field | Type | Collation | Null | Key | Default | Extra | Privileges | Comment |
+					// TODO: missing privileges
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "", "", ""},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "UNI", nil, "", "", "column s"},
+						{"i2", "int", nil, "YES", "", "42", "", "", "hello"},
+					},
+				},
+				{
+					Query: "SELECT * FROM mytable ORDER BY i;",
+					Expected: []sql.Row{
+						sql.NewRow(int64(1), "first row", int32(42)),
+						sql.NewRow(int64(2), "second row", int32(42)),
+						sql.NewRow(int64(3), "third row", int32(42)),
+					},
+				},
+			},
+		},
+		{
+			Name: "add column, no default",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE mytable ADD COLUMN s2 TEXT COMMENT 'hello';",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "", "", ""},
+						{"s2", "text", "utf8mb4_0900_bin", "YES", "", nil, "", "", "hello"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "UNI", nil, "", "", "column s"},
+						{"i2", "int", nil, "YES", "", "42", "", "", "hello"},
+					},
+				},
+				{
+					Query: "SELECT * FROM mytable ORDER BY i;",
+					Expected: []sql.Row{
+						sql.NewRow(int64(1), "first row", int32(42), nil),
+						sql.NewRow(int64(2), "second row", int32(42), nil),
+						sql.NewRow(int64(3), "third row", int32(42), nil),
+					},
+				},
+				{
+					Query:    "insert into mytable values (4, 'fourth row', 11, 's2');",
+					Expected: []sql.Row{{types.NewOkResult(1)}},
+				},
+				{
+					Query:    "update mytable set s2 = 'updated s2' where i2 = 42;",
+					Expected: []sql.Row{{types.OkResult{RowsAffected: 3}}},
+				},
+				{
+					Query: "SELECT * FROM mytable ORDER BY i;",
+					Expected: []sql.Row{
+						sql.NewRow(int64(1), "first row", int32(42), "updated s2"),
+						sql.NewRow(int64(2), "second row", int32(42), "updated s2"),
+						sql.NewRow(int64(3), "third row", int32(42), "updated s2"),
+						sql.NewRow(int64(4), "fourth row", int32(11), "s2"),
+					},
+				},
+			},
+		},
+		{
+			Name: "multiple in one statement",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE mytable ADD COLUMN s5 VARCHAR(26), ADD COLUMN s6 VARCHAR(27)",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "", "", ""},
+						{"s2", "text", "utf8mb4_0900_bin", "YES", "", nil, "", "", "hello"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "UNI", nil, "", "", "column s"},
+						{"i2", "int", nil, "YES", "", "42", "", "", "hello"},
+						{"s5", "varchar(26)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+						{"s6", "varchar(27)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+					},
+				},
+				{
+					Query: "SELECT * FROM mytable ORDER BY i;",
+					Expected: []sql.Row{
+						sql.NewRow(int64(1), "first row", int32(42), "updated s2", nil, nil),
+						sql.NewRow(int64(2), "second row", int32(42), "updated s2", nil, nil),
+						sql.NewRow(int64(3), "third row", int32(42), "updated s2", nil, nil),
+						sql.NewRow(int64(4), "fourth row", int32(11), "s2", nil, nil),
+					},
+				},
+			},
+		},
+		{
+			Name: "error cases",
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE not_exist ADD COLUMN i2 INT COMMENT 'hello'",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN b BIGINT COMMENT 'ok' AFTER not_exist",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN i BIGINT COMMENT 'ok'",
+					ExpectedErr: sql.ErrColumnExists,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN b INT NOT NULL DEFAULT 'yes'",
+					ExpectedErr: sql.ErrIncompatibleDefaultType,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN c int, add c int",
+					ExpectedErr: sql.ErrColumnExists,
+				},
+			},
+		},
+	}
+	RunAddColumnTest(t, NewDefaultDuckHarness())
+}
+
+func RunAddColumnTest(t *testing.T, harness enginetest.Harness) {
+	harness.Setup(setup.MydbData, setup.MytableData)
+	e := mustNewEngine(t, harness)
+	defer e.Close()
+
+	for _, tt := range queries.AddColumnScripts {
+		enginetest.TestScriptWithEngine(t, e, harness, tt)
+	}
+
+	t.Run("no database selected", func(t *testing.T) {
+		ctx := enginetest.NewContext(harness)
+		ctx.SetCurrentDatabase("")
+		if se, ok := e.(*enginetest.ServerQueryEngine); ok {
+			se.NewConnection(ctx)
+		}
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "select database()", []sql.Row{{nil}}, nil, nil, nil)
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "ALTER TABLE mydb.mytable ADD COLUMN s10 VARCHAR(26)", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW FULL COLUMNS FROM mydb.mytable", []sql.Row{
+			{"i", "bigint", nil, "NO", "PRI", nil, "", "", ""},
+			{"s2", "text", "utf8mb4_0900_bin", "YES", "", nil, "", "", "hello"},
+			{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "UNI", nil, "", "", "column s"},
+			{"i2", "int", nil, "YES", "", "42", "", "", "hello"},
+			{"s5", "varchar(26)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+			{"s6", "varchar(27)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+			{"s10", "varchar(26)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+		}, nil, nil, nil)
+	})
 }
 
 func TestModifyColumn(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestModifyColumn(t, NewDefaultDuckHarness())
+	queries.ModifyColumnScripts = []queries.ScriptTest{
+		{
+			Name: "column at end with default",
+			SetUpScript: []string{
+				"CREATE TABLE mytable_modify_column (i bigint not null, s varchar(20) not null comment 'column s')",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i bigint NOT NULL COMMENT 'modified'",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 1 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "", nil, "", "", "modified"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
+					},
+				},
+				{
+					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i TINYINT NOT NULL COMMENT 'yes'",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 2 */",
+					Expected: []sql.Row{
+						{"i", "tinyint", nil, "NO", "", nil, "", "", "yes"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
+					},
+				},
+				{
+					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok'",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 3 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
+					},
+				},
+				{
+					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 4 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
+					},
+				},
+			},
+		},
+		{
+			Name:        "auto increment attribute",
+			SetUpScript: []string{},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Skip:     true,
+					Query:    "ALTER TABLE mytable MODIFY i BIGINT auto_increment",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Skip:  true,
+					Query: "SHOW FULL COLUMNS FROM mytable /* 1 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "auto_increment", "", ""},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
+					},
+				},
+				{
+					Skip:  true,
+					Query: "insert into mytable (s) values ('new row')",
+				},
+				{
+					Skip:        true,
+					Query:       "ALTER TABLE mytable add column i2 bigint auto_increment",
+					ExpectedErr: sql.ErrInvalidAutoIncCols,
+				},
+				{
+					Skip:  true,
+					Query: "alter table mytable add column i2 bigint",
+				},
+				{
+					Skip:        true,
+					Query:       "ALTER TABLE mytable modify column i2 bigint auto_increment",
+					ExpectedErr: sql.ErrInvalidAutoIncCols,
+				},
+				{
+					Skip:  true,
+					Query: "SHOW FULL COLUMNS FROM mytable /* 2 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "auto_increment", "", ""},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
+						{"i2", "bigint", nil, "YES", "", nil, "", "", ""},
+					},
+				},
+				{
+					Skip:     true,
+					Query:    "ALTER TABLE mytable MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok' FIRST",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Skip:  true,
+					Query: "SHOW FULL COLUMNS FROM mytable /* 3 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "", "", "ok"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
+						{"i2", "bigint", nil, "YES", "", nil, "", "", ""},
+					},
+				},
+				{
+					Skip:     true,
+					Query:    "ALTER TABLE mytable MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Skip:  true,
+					Query: "SHOW FULL COLUMNS FROM mytable /* 4 */",
+					Expected: []sql.Row{
+						{"i", "bigint", nil, "NO", "PRI", nil, "", "", "ok"},
+						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
+						{"i2", "bigint", nil, "YES", "", nil, "", "", ""},
+					},
+				},
+			},
+		},
+		{
+			Name:        "error cases",
+			SetUpScript: []string{},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE mytable MODIFY not_exist BIGINT NOT NULL COMMENT 'ok' FIRST",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable MODIFY i BIGINT NOT NULL COMMENT 'ok' AFTER not_exist",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Query:       "ALTER TABLE not_exist MODIFY COLUMN i INT NOT NULL COMMENT 'hello'",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN b INT NOT NULL DEFAULT 'yes'",
+					ExpectedErr: sql.ErrIncompatibleDefaultType,
+				},
+				{
+					Query:       "ALTER TABLE mytable ADD COLUMN c int, add c int",
+					ExpectedErr: sql.ErrColumnExists,
+				},
+			},
+		},
+	}
+
+	RunModifyColumnTest(t, NewDefaultDuckHarness())
+}
+
+func RunModifyColumnTest(t *testing.T, harness enginetest.Harness) {
+	harness.Setup(setup.MydbData, setup.MytableData, setup.Mytable_del_idxData)
+	e := mustNewEngine(t, harness)
+	defer e.Close()
+
+	for _, tt := range queries.ModifyColumnScripts {
+		enginetest.TestScriptWithEngine(t, e, harness, tt)
+	}
+
+	t.Run("no database selected", func(t *testing.T) {
+		ctx := enginetest.NewContext(harness)
+		ctx.SetCurrentDatabase("")
+		if se, ok := e.(*enginetest.ServerQueryEngine); ok {
+			se.NewConnection(ctx)
+		}
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "select database()", []sql.Row{{nil}}, nil, nil, nil)
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "ALTER TABLE mydb.mytable_modify_column MODIFY COLUMN s VARCHAR(21) NULL COMMENT 'changed again'", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW FULL COLUMNS FROM mydb.mytable_modify_column", []sql.Row{
+			{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
+			{"s", "varchar(21)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed again"},
+		}, nil, nil, nil)
+	})
 }
 
 func TestDropColumn(t *testing.T) {
-	t.Skip("wait for fix")
+	queries.DropColumnScripts = []queries.ScriptTest{
+		{
+			Name: "drop column",
+			SetUpScript: []string{
+				"CREATE TABLE mytable_drop_column (i bigint primary key, s varchar(20))",
+				"INSERT INTO mytable_drop_column VALUES (1, 'first row'), (2, 'second row'), (3, 'third row')",
+				"ALTER TABLE mytable_drop_column DROP COLUMN s",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "SHOW FULL COLUMNS FROM mytable_drop_column",
+					Expected: []sql.Row{{"i", "bigint", nil, "NO", "PRI", nil, "", "", ""}},
+				},
+				{
+					Query:    "select * from mytable_drop_column order by i",
+					Expected: []sql.Row{{1}, {2}, {3}},
+				},
+			},
+		},
+		{
+			Name: "drop first column",
+			SetUpScript: []string{
+				"CREATE TABLE t1 (a int, b varchar(10), c bigint, k bigint not null)",
+				"insert into t1 values (1, 'abc', 2, 3), (4, 'def', 5, 6)",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE t1 DROP COLUMN a",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM t1",
+					Expected: []sql.Row{
+						{"b", "varchar(10)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+						{"c", "bigint", nil, "YES", "", nil, "", "", ""},
+						{"k", "bigint", nil, "NO", "", nil, "", "", ""},
+					},
+				},
+				{
+					Query: "SELECT * FROM t1 ORDER BY b",
+					Expected: []sql.Row{
+						{"abc", 2, 3},
+						{"def", 5, 6},
+					},
+				},
+			},
+		},
+		{
+			Name: "drop middle column",
+			SetUpScript: []string{
+				"CREATE TABLE t2 (a int, b varchar(10), c bigint, k bigint not null)",
+				"insert into t2 values (1, 'abc', 2, 3), (4, 'def', 5, 6)",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:    "ALTER TABLE t2 DROP COLUMN b",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Query: "SHOW FULL COLUMNS FROM t2",
+					Expected: []sql.Row{
+						{"a", "int", nil, "YES", "", nil, "", "", ""},
+						{"c", "bigint", nil, "YES", "", nil, "", "", ""},
+						{"k", "bigint", nil, "NO", "", nil, "", "", ""},
+					},
+				},
+				{
+					Query: "SELECT * FROM t2 ORDER BY c",
+					Expected: []sql.Row{
+						{1, 2, 3},
+						{4, 5, 6},
+					},
+				},
+			},
+		},
+		{
+			// TODO: primary key column drops not well supported yet
+			Name: "drop primary key column",
+			SetUpScript: []string{
+				"CREATE TABLE t3 (a int primary key, b varchar(10), c bigint)",
+				"insert into t3 values (1, 'abc', 2), (3, 'def', 4)",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Skip:     true,
+					Query:    "ALTER TABLE t3 DROP COLUMN a",
+					Expected: []sql.Row{{types.NewOkResult(0)}},
+				},
+				{
+					Skip:  true,
+					Query: "SHOW FULL COLUMNS FROM t3",
+					Expected: []sql.Row{
+						{"b", "varchar(10)", "utf8mb4_0900_bin", "YES", "", nil, "", "", ""},
+						{"c", "bigint", nil, "YES", "", nil, "", "", ""},
+					},
+				},
+				{
+					Skip:  true,
+					Query: "SELECT * FROM t3 ORDER BY b",
+					Expected: []sql.Row{
+						{"abc", 2},
+						{"def", 4},
+					},
+				},
+			},
+		},
+		{
+			Name: "error cases",
+			SetUpScript: []string{
+				"create table t4 (a int primary key, b int, c int default (10))",
+			},
+			Assertions: []queries.ScriptTestAssertion{
+				{
+					Query:       "ALTER TABLE not_exist DROP COLUMN s",
+					ExpectedErr: sql.ErrTableNotFound,
+				},
+				{
+					Query:       "ALTER TABLE t4 DROP COLUMN s",
+					ExpectedErr: sql.ErrTableColumnNotFound,
+				},
+				{
+					Skip:        true,
+					Query:       "ALTER TABLE t4 DROP COLUMN b",
+					ExpectedErr: sql.ErrDropColumnReferencedInDefault,
+				},
+			},
+		},
+	}
 	enginetest.TestDropColumn(t, NewDefaultDuckHarness())
 }
 
