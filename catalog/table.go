@@ -337,10 +337,11 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 
 	// Construct the SQL statement for creating the index
 	var sqlsBuilder strings.Builder
+	sqlsBuilder.WriteString(fmt.Sprintf(`USE %s; `, FullSchemaName(t.db.catalog, "")))
 	sqlsBuilder.WriteString(fmt.Sprintf(`CREATE %s INDEX "%s" ON %s (%s)`,
 		unique,
 		EncodeIndexName(t.name, indexDef.Name),
-		FullTableName(t.db.catalog, t.db.name, t.name),
+		FullTableName("", t.db.name, t.name),
 		strings.Join(columns, ", ")))
 
 	// Add the index comment if provided
@@ -439,7 +440,10 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 		}
 
 		_, indexName := DecodeIndexName(encodedIndexName)
-		columnNames := DecodeCreateindex(createIndexSQL)
+		columnNames, err := DecodeCreateindex(createIndexSQL)
+		if err != nil {
+			return nil, ErrDuckDB.New(err)
+		}
 
 		for _, columnName := range columnNames {
 			if columnInfo, exists := columnsInfoMap[columnName]; exists {
