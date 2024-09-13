@@ -326,6 +326,10 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 		if IsDuckDBIndexAlreadyExistsError(err) {
 			return sql.ErrDuplicateKey.New(indexDef.Name)
 		}
+		if IsDuckDBUniqueConstraintViolationError(err) {
+			return sql.ErrUniqueKeyViolation.New()
+		}
+
 		return ErrDuckDB.New(err)
 	}
 

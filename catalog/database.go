@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/apecloud/myduckserver/adapter"
+	"github.com/apecloud/myduckserver/transpiler"
 	"github.com/dolthub/go-mysql-server/sql"
 )
 
@@ -125,7 +126,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		}
 
 		if col.Default != nil {
-			colDef += " DEFAULT " + col.Default.String()
+			colDef += " DEFAULT " + transpiler.NormalizeStrings(col.Default.String())
 		}
 
 		columns = append(columns, colDef)

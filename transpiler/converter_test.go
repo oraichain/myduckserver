@@ -101,7 +101,7 @@ func TestNormalizeStrings(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.input, func(t *testing.T) {
-			actual := normalizeStrings(test.input)
+			actual := NormalizeStrings(test.input)
 			require.Equal(t, test.expected, actual)
 		})
 	}

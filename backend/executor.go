@@ -66,7 +66,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case *plan.CreateDB, *plan.DropDB, *plan.DropTable, *plan.RenameTable,
 		*plan.CreateTable, *plan.AddColumn, *plan.RenameColumn, *plan.DropColumn, *plan.ModifyColumn,
 		*plan.CreateIndex, *plan.DropIndex, *plan.AlterIndex, *plan.ShowIndexes,
-		*plan.ShowTables, *plan.ShowCreateTable,
+		*plan.ShowTables, *plan.ShowCreateTable, *plan.ShowColumns,
 		*plan.ShowBinlogs, *plan.ShowBinlogStatus, *plan.ShowWarnings,
 		*plan.StartTransaction, *plan.Commit, *plan.Rollback,
 		*plan.Set, *plan.ShowVariables,
@@ -108,9 +108,9 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	case sql.Expressioner:
 		return b.executeExpressioner(ctx, node, conn)
 	case *plan.DeleteFrom:
-		return b.executeDML(ctx, n, conn)
+		return b.executeDML(ctx, conn)
 	case *plan.Truncate:
-		return b.executeDML(ctx, n, conn)
+		return b.executeDML(ctx, conn)
 	default:
 		return b.base.Build(ctx, n, r)
 	}
@@ -118,11 +118,11 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 
 func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, conn *stdsql.Conn) (sql.RowIter, error) {
 	node := n.(sql.Node)
-	switch n := n.(type) {
+	switch n.(type) {
 	case *plan.InsertInto:
-		return b.executeDML(ctx, n, conn)
+		return b.executeDML(ctx, conn)
 	case *plan.Update:
-		return b.executeDML(ctx, n, conn)
+		return b.executeDML(ctx, conn)
 	default:
 		return b.executeQuery(ctx, node, conn)
 	}
@@ -141,10 +141,10 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 	case *plan.ShowTables:
 		duckSQL = ctx.Query()
 	default:
-		duckSQL, err = transpiler.Translate(n, ctx.Query())
+		duckSQL, err = transpiler.TranslateWithSQLGlot(ctx.Query())
 	}
 	if err != nil {
-		return nil, err
+		return nil, catalog.ErrTranspiler.New(err)
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -161,11 +161,11 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 	return NewSQLRowIter(rows, n.Schema())
 }
 
-func (b *DuckBuilder) executeDML(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
+func (b *DuckBuilder) executeDML(ctx *sql.Context, conn *stdsql.Conn) (sql.RowIter, error) {
 	// Translate the MySQL query to a DuckDB query
-	duckSQL, err := transpiler.Translate(n, ctx.Query())
+	duckSQL, err := transpiler.TranslateWithSQLGlot(ctx.Query())
 	if err != nil {
-		return nil, err
+		return nil, catalog.ErrTranspiler.New(err)
 	}
 
 	logrus.WithFields(logrus.Fields{

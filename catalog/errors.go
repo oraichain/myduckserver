@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	ErrDuckDB = errors.NewKind("duckdb: %v")
+	ErrDuckDB     = errors.NewKind("duckdb: %v")
+	ErrTranspiler = errors.NewKind("transpiler: %v")
 )
 
 func IsDuckDBCatalogError(err error) bool {
@@ -34,4 +35,9 @@ func IsDuckDBSetSchemaNotFoundError(err error) bool {
 // ERROR 1105 (HY000): duckdb: Catalog Error: Index with name "x_idx" already exists!
 func IsDuckDBIndexAlreadyExistsError(err error) bool {
 	return IsDuckDBCatalogError(err) && strings.Contains(err.Error(), "Index with name") && strings.Contains(err.Error(), "already exists")
+}
+
+// ERROR 1105 (HY000): duckdb: Constraint Error: Data contains duplicates on indexed column(s)
+func IsDuckDBUniqueConstraintViolationError(err error) bool {
+	return strings.Contains(err.Error(), "Constraint Error: Data contains duplicates on indexed column(s)")
 }

@@ -5,7 +5,7 @@ import (
 )
 
 func ConvertQuery(query string) []string {
-	query = normalizeStrings(query)
+	query = NormalizeStrings(query)
 	return []string{query}
 }
 
@@ -48,8 +48,8 @@ const doubleQuote = '"'
 const backtick = '`'
 const backslash = '\\'
 
-// normalizeStrings normalizes a query string to convert any MySQL syntax to Postgres syntax
-func normalizeStrings(q string) string {
+// NormalizeStrings normalizes a query string to convert any MySQL syntax to Postgres syntax
+func NormalizeStrings(q string) string {
 	state := notInString
 	lastCharWasBackslash := false
 	normalized := strings.Builder{}

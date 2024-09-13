@@ -25,9 +25,6 @@ import (
 	"sync"
 
 	"gopkg.in/src-d/go-errors.v1"
-
-	"github.com/dolthub/go-mysql-server/sql"
-	"github.com/dolthub/go-mysql-server/sql/plan"
 )
 
 const (
@@ -221,27 +218,6 @@ func (svc *translateService) cleanup() {
 	defer svc.mu.Unlock()
 	sendString(svc.pyStdin, cmdExit)
 	svc.pyCmd.Wait()
-}
-
-func Translate(node sql.Node, sql string) (string, error) {
-	switch node.(type) {
-	case *plan.CreateTable,
-		// Convert the CREATE TABLE statement using the built-in transpiler; ignore possible create index statements for now
-		*plan.ResolvedTable,
-		// Simple SELECT statements, e.g., `SELECT * FROM tbl` or `SELECT col1, col2 FROM tbl`
-		*plan.ShowTables,
-		*plan.ShowColumns:
-		return translateBuiltIn(sql)
-	default:
-		// For other types of queries, use SQLGlot to convert the query
-		return TranslateWithSQLGlot(sql)
-	}
-}
-
-func translateBuiltIn(sql string) (string, error) {
-	// TODO(fan): https://github.com/dolthub/doltgresql/issues/660
-	// return transpiler.ConvertQuery(sql)[0], nil
-	return TranslateWithSQLGlot(sql)
 }
 
 func TranslateWithSQLGlot(sql string) (string, error) {

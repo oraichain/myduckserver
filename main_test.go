@@ -1516,8 +1516,68 @@ func TestColumnDefaults(t *testing.T) {
 }
 
 func TestAlterTable(t *testing.T) {
-	t.Skip("wait for fix")
-	enginetest.TestAlterTable(t, NewDefaultDuckHarness())
+
+	harness := NewDefaultDuckHarness()
+
+	// patch the test script since we don't support column as default value yet
+	replaceQueryInScriptTest(queries.AlterTableScripts, "variety of alter column statements in a single statement",
+		"CREATE TABLE t32(pk BIGINT PRIMARY KEY, v1 int, v2 int, v3 int default (v1), toRename int)",
+		"CREATE TABLE t32(pk BIGINT PRIMARY KEY, v1 int, v2 int, v3 int default (10), toRename int)",
+	)
+
+	// patch the test script since we don't support check constraints yet
+	replaceQueryInScriptTest(queries.AlterTableScripts, "drop column drops check constraint",
+		`ALTER TABLE t34 ADD CONSTRAINT test_check CHECK (j < 12345)`,
+		``,
+	)
+
+	harness.QueriesToSkip(
+		// skip "mix of alter column, add and drop constraints in one statement" since check constraints are not supported
+		`CREATE TABLE t33(pk BIGINT PRIMARY KEY, v1 int, v2 int)`,
+		// skip "ALTER TABLE ... ALTER ADD CHECK / DROP CHECK" since check constraints are not supported
+		"CREATE TABLE test (pk BIGINT PRIMARY KEY, v1 BIGINT NOT NULL DEFAULT 88);",
+		// skip "multi alter with invalid schemas", we support longer varchar lengths
+		"CREATE TABLE t(a int primary key)",
+		// skip "alter table containing column default value expressions" since we don't support current_timestamp default value yet
+		"create table t (pk int primary key, col1 timestamp(6) default current_timestamp(6), col2 varchar(1000), index idx1 (pk, col1));",
+		// skip "drop check as part of alter block" since check constraints are not supported
+		"create table t42 (i bigint primary key, j int, CONSTRAINT check1 CHECK (j < 12345), CONSTRAINT check2 CHECK (j > 0))",
+		// skip "drop constraint as part of alter block" since check constraints are not supported
+		"create table t42 (i bigint primary key, j int, CONSTRAINT check1 CHECK (j < 12345), CONSTRAINT check2 CHECK (j > 0))",
+		// skip "drop column drops all relevant check constraints" since check constraints are not supported
+		"ALTER TABLE t42 ADD CONSTRAINT check1 CHECK (j < 12345)",
+		// skip "drop column drops correct check constraint" since check constraints are not supported
+		"create table t41 (i bigint primary key, s varchar(20))",
+		// skip "drop column does not drop when referenced in constraint with other column" since check constraints are not supported
+		"create table t43 (i bigint primary key, s varchar(20))",
+		// skip "drop column preserves indexes" since duckdb has more strict dropping rules for tables with indexes
+		"create table t35 (i bigint primary key, s varchar(20), s2 varchar(20))",
+		// skip "drop column prevents foreign key violations" since foreign keys are not supported
+		"create table t36 (i bigint primary key, j varchar(20))",
+		// skip "ALTER TABLE remove AUTO_INCREMENT" since AUTO_INCREMENT is not supported yet
+		"CREATE TABLE t40 (pk int AUTO_INCREMENT PRIMARY KEY, val int)",
+		// skip "ALTER TABLE does not change column collations"
+		"CREATE TABLE test1 (v1 VARCHAR(200), v2 ENUM('a'), v3 SET('a'));",
+		// skip "ALTER TABLE AUTO INCREMENT no-ops on table with no original auto increment key"
+		"CREATE table test (pk int primary key)",
+		// skip "ALTER TABLE MODIFY column with UNIQUE KEY" since duckdb has more strict rules for modifying columns with constraints
+		"CREATE table test (pk int primary key, uk int unique)",
+		// skip "ALTER TABLE MODIFY column making UNIQUE" due to differences in error messages
+		"CREATE table test (pk int primary key, uk int)",
+		// skip "ALTER TABLE MODIFY column with KEY"  since duckdb has more strict rules for modifying columns with constraints
+		"CREATE table test (pk int primary key, mk int, index (mk))",
+		// skip "Identifier lengths"
+		"create table t1 (a int primary key, b int)",
+		// skip "Prefix index with same columns as another index"
+		"CREATE table t (pk int primary key, col1 varchar(100));",
+		//skip some assertions in "Index case-insensitivity"
+		"alter table t2 rename index myIndex2 to mySecondIndex;",
+		"show indexes from t2;",
+		"alter table t3 rename index MYiNDEX3 to anotherIndex;",
+		"show indexes from t3;",
+	)
+
+	enginetest.TestAlterTable(t, harness)
 }
 
 func TestDateParse(t *testing.T) {
@@ -1757,6 +1817,26 @@ func replaceQueryTestByQuery(tests []queries.QueryTest, targetQuery string, upda
 		if test.Query == targetQuery {
 			tests[i] = updatedTest
 			return
+		}
+	}
+}
+
+func replaceQueryInScriptTest(tests []queries.ScriptTest, targetScript string, targetQuery string, updatedQuery string) {
+	for _, test := range tests {
+		if test.Name == targetScript {
+			for i, setUp := range test.SetUpScript {
+				if setUp == targetQuery {
+					test.SetUpScript[i] = updatedQuery
+					return
+				}
+			}
+
+			for _, assertion := range test.Assertions {
+				if assertion.Query == targetQuery {
+					assertion.Query = updatedQuery
+					return
+				}
+			}
 		}
 	}
 }
