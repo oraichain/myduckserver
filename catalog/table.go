@@ -97,13 +97,14 @@ func getPKSchema(ctx *sql.Context, catalogName, dbName, tableName string) sql.Pr
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
+
 	for _, columnInfo := range columns {
+		decodedComment := DecodeComment[MySQLType](columnInfo.Comment.String)
+
 		defaultValue := (*sql.ColumnDefaultValue)(nil)
 		if columnInfo.ColumnDefault.Valid {
-			defaultValue = sql.NewUnresolvedColumnDefaultValue(columnInfo.ColumnDefault.String)
+			defaultValue = sql.NewUnresolvedColumnDefaultValue(decodedComment.Meta.Default)
 		}
-
-		decodedComment := DecodeComment[MySQLType](columnInfo.Comment.String)
 
 		column := &sql.Column{
 			Name:           columnInfo.ColumnName,
@@ -182,6 +183,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 
 	if column.Default != nil {
 		sql += fmt.Sprintf(" DEFAULT %s", column.Default.String())
+		typ.mysql.Default = column.Default.String()
 	}
 
 	// add comment
@@ -234,6 +236,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 
 	if column.Default != nil {
 		sqls = append(sqls, fmt.Sprintf(`%s SET DEFAULT %s`, baseSQL, column.Default.String()))
+		typ.mysql.Default = column.Default.String()
 	} else {
 		sqls = append(sqls, fmt.Sprintf(`%s DROP DEFAULT`, baseSQL))
 	}
