@@ -32,6 +32,7 @@ import (
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/enginetest"
+	"github.com/dolthub/go-mysql-server/enginetest/queries"
 	"github.com/dolthub/go-mysql-server/enginetest/scriptgen/setup"
 	"github.com/dolthub/go-mysql-server/memory"
 	"github.com/dolthub/go-mysql-server/server"
@@ -439,4 +440,27 @@ func sanityCheckDatabase(ctx *sql.Context, db sql.Database) error {
 		}
 	}
 	return nil
+}
+
+// Find the test statements under ScriptTest by name.
+func (m *DuckHarness) GetScriptQueries(tests []queries.ScriptTest, namesToSkip []string) []string {
+
+	skipMap := make(map[string]bool)
+	for _, name := range namesToSkip {
+		skipMap[querySignature(name)] = true
+	}
+
+	var results []string
+	for _, test := range tests {
+		testName := querySignature(test.Name)
+		if skipMap[testName] {
+			for _, setupscript := range test.SetUpScript {
+				results = append(results, querySignature(setupscript))
+			}
+			for _, assertion := range test.Assertions {
+				results = append(results, querySignature(assertion.Query))
+			}
+		}
+	}
+	return results
 }

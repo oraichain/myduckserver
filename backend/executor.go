@@ -70,6 +70,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 		*plan.ShowBinlogs, *plan.ShowBinlogStatus, *plan.ShowWarnings,
 		*plan.StartTransaction, *plan.Commit, *plan.Rollback,
 		*plan.Set, *plan.ShowVariables,
+		*plan.AlterDefaultSet, *plan.AlterDefaultDrop,
 		*plan.LoadData:
 		return b.base.Build(ctx, root, r)
 	case *plan.InsertInto:

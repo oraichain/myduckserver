@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/apecloud/myduckserver/transpiler"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/dolthub/vitess/go/sqltypes"
+	"github.com/dolthub/vitess/go/vt/sqlparser"
 )
 
 // TODO(ysg): Refactor this implementation by using interface{} to represent a DuckDB type,
@@ -304,4 +306,25 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 	default:
 		panic(fmt.Sprintf("encountered unknown DuckDB type(%v). This is likely a bug - please check the duckdbDataType function for missing type mappings", duckType))
 	}
+}
+
+func (typ *MySQLType) withDefault(defaultValue string) (string, error) {
+	typ.Default = defaultValue
+	parsed, err := sqlparser.Parse(fmt.Sprintf("SELECT %s", defaultValue))
+	if err != nil {
+		return "", err
+	}
+	selectStmt, ok := parsed.(*sqlparser.Select)
+	if !ok {
+		return "", fmt.Errorf("expected SELECT statement, got %T", parsed)
+	}
+	expr := selectStmt.SelectExprs[0].(*sqlparser.AliasedExpr).Expr
+	switch expr := expr.(type) {
+	case *sqlparser.FuncExpr:
+		if expr.Name.Lowered() == "current_timestamp" {
+			return "CURRENT_TIMESTAMP", nil
+		}
+	}
+	normalized := transpiler.NormalizeStrings(defaultValue)
+	return normalized, nil
 }
