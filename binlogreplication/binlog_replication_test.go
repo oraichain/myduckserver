@@ -121,7 +121,7 @@ func TestBinlogReplicationSanityCheck(t *testing.T) {
 	// Insert/Update/Delete on the primary
 	primaryDatabase.MustExec("insert into tableT values(100), (200)")
 	waitForReplicaToCatchUp(t)
-	requireReplicaResults(t, "select * from db01.tableT", [][]any{{"100"}, {"200"}})
+	requireReplicaResults(t, "select * from db01.tableT order by pk", [][]any{{"100"}, {"200"}})
 	primaryDatabase.MustExec("delete from tableT where pk = 100")
 	waitForReplicaToCatchUp(t)
 	requireReplicaResults(t, "select * from db01.tableT", [][]any{{"200"}})
@@ -237,7 +237,7 @@ func TestFlushLogs(t *testing.T) {
 	primaryDatabase.MustExec("insert into t values (1), (2), (3);")
 	waitForReplicaToCatchUp(t)
 
-	requireReplicaResults(t, "select * from db01.t;", [][]any{
+	requireReplicaResults(t, "select * from db01.t order by pk;", [][]any{
 		{"1"}, {"2"}, {"3"},
 	})
 }

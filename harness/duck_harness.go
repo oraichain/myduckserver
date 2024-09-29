@@ -297,7 +297,7 @@ func (e *DuckTestEngine) Close() error {
 func NewEngine(t *testing.T, harness enginetest.Harness, dbProvider sql.DatabaseProvider, setupData []setup.SetupScript, statsProvider sql.StatsProvider, server bool) (enginetest.QueryEngine, error) {
 	// Create the connection pool first, as it is needed by `NewEngineWithProvider`
 	provider := dbProvider.(*catalog.DatabaseProvider)
-	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Storage())
+	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Connector(), provider.Storage())
 	harness.(*DuckHarness).pool = pool
 
 	e := enginetest.NewEngineWithProvider(t, harness, dbProvider)

@@ -20,7 +20,7 @@ import (
 	"sync"
 
 	"github.com/dolthub/go-mysql-server/sql"
-	"github.com/dolthub/vitess/go/mysql"
+	"vitess.io/vitess/go/mysql"
 )
 
 // filterConfiguration defines the binlog filtering rules applied on the replica.

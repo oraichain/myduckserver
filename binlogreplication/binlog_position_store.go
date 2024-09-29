@@ -25,7 +25,7 @@ import (
 
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
-	"github.com/dolthub/vitess/go/mysql"
+	"vitess.io/vitess/go/mysql/replication"
 )
 
 const binlogPositionDirectory = ".replica"
@@ -45,33 +45,33 @@ type binlogPositionStore struct {
 // represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
 // default binlog channel ("") is supported. If no .replica/binlog-position file is stored, this method returns a nil
 // mysql.Position and a nil error. If any errors are encountered, a nil mysql.Position and an error are returned.
-func (store *binlogPositionStore) Load(engine *gms.Engine) (*mysql.Position, error) {
+func (store *binlogPositionStore) Load(engine *gms.Engine) (pos replication.Position, err error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	dir := filepath.Join(getDataDir(engine), binlogPositionDirectory)
-	_, err := os.Stat(dir)
+	_, err = os.Stat(dir)
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return pos, nil
 	} else if err != nil {
-		return nil, err
+		return pos, err
 	}
 
 	_, err = os.Stat(filepath.Join(dir, binlogPositionFilename))
 	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return pos, nil
 	} else if err != nil {
-		return nil, err
+		return pos, err
 	}
 
 	filePath, err := filepath.Abs(filepath.Join(dir, binlogPositionFilename))
 	if err != nil {
-		return nil, err
+		return pos, err
 	}
 
 	bytes, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, err
+		return pos, err
 	}
 	positionString := string(bytes)
 
@@ -81,12 +81,7 @@ func (store *binlogPositionStore) Load(engine *gms.Engine) (*mysql.Position, err
 		positionString = string(bytes[len(prefix):])
 	}
 
-	position, err := mysql.ParsePosition(mysqlFlavor, positionString)
-	if err != nil {
-		return nil, err
-	}
-
-	return &position, nil
+	return replication.ParsePosition(mysqlFlavor, positionString)
 }
 
 // Save saves the specified |position| to disk in the .replica/binlog-position file at the root of the provider's
@@ -95,8 +90,8 @@ func (store *binlogPositionStore) Load(engine *gms.Engine) (*mysql.Position, err
 // represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
 // default binlog channel ("") is supported. If any errors are encountered persisting the position to disk, an
 // error is returned.
-func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, position *mysql.Position) error {
-	if position == nil {
+func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, position replication.Position) error {
+	if position.IsZero() {
 		return fmt.Errorf("unable to save binlog position: nil position passed")
 	}
 
@@ -114,7 +109,7 @@ func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, pos
 		return err
 	}
 
-	encodedPosition := mysql.EncodePosition(*position)
+	encodedPosition := replication.EncodePosition(position)
 	return os.WriteFile(filePath, []byte(encodedPosition), 0666)
 }
 

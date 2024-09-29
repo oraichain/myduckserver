@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 
 	"github.com/dolthub/go-mysql-server/sql"
-	"github.com/dolthub/vitess/go/mysql"
+	"vitess.io/vitess/go/mysql"
 )
 
 // binlogEventProducer is responsible for reading binlog events from an established connection and sending them back to
@@ -70,7 +70,7 @@ func (p *binlogEventProducer) Go(_ *sql.Context) {
 
 			// If this binlogEventProducer has been stopped while we were blocked waiting to read the next
 			// binlog event, abort processing it and just return instead.
-			if p.IsRunning() == false {
+			if !p.IsRunning() {
 				break
 			}
 

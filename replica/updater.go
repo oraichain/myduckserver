@@ -1,139 +1,19 @@
-// Copyright 2024-2025 ApeCloud, Ltd.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-package main
+package replica
 
 import (
-	"context"
 	stdsql "database/sql"
-	"database/sql/driver"
+	"errors"
 	"strings"
 
-	sqle "github.com/dolthub/go-mysql-server"
-	"github.com/dolthub/go-mysql-server/memory"
-	"github.com/dolthub/go-mysql-server/sql"
-	"github.com/dolthub/vitess/go/mysql"
-	"github.com/marcboeker/go-duckdb"
-	"github.com/sirupsen/logrus"
-
 	"github.com/apecloud/myduckserver/backend"
+	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/binlogreplication"
-	"github.com/apecloud/myduckserver/catalog"
+	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/sirupsen/logrus"
+	"vitess.io/vitess/go/mysql"
 )
 
-// registerReplicaController registers the replica controller into the engine
-// to handle the replication commands, such as START REPLICA, STOP REPLICA, etc.
-func registerReplicaController(provider *catalog.DatabaseProvider, engine *sqle.Engine, pool *backend.ConnectionPool) {
-	replica := binlogreplication.MyBinlogReplicaController
-	replica.SetEngine(engine)
-
-	session := backend.NewSession(memory.NewSession(sql.NewBaseSession(), provider), provider, pool)
-	ctx := sql.NewContext(context.Background(), sql.WithSession(session))
-	ctx.SetCurrentDatabase("mysql")
-	replica.SetExecutionContext(ctx)
-
-	replica.SetTableWriterProvider(&tableWriterProvider{pool})
-
-	engine.Analyzer.Catalog.BinlogReplicaController = binlogreplication.MyBinlogReplicaController
-
-	// If we're unable to restart replication, log an error, but don't prevent the server from starting up
-	if err := binlogreplication.MyBinlogReplicaController.AutoStart(ctx); err != nil {
-		logrus.Errorf("unable to restart replication: %s", err.Error())
-	}
-}
-
-type tableWriterProvider struct {
-	pool *backend.ConnectionPool
-}
-
-var _ binlogreplication.TableWriterProvider = &tableWriterProvider{}
-
-func (twp *tableWriterProvider) GetTableWriter(
-	ctx *sql.Context, engine *sqle.Engine,
-	databaseName, tableName string,
-	schema sql.Schema,
-	columnCount, rowCount int,
-	identifyColumns, dataColumns mysql.Bitmap,
-	eventType binlogreplication.EventType,
-	foreignKeyChecksDisabled bool,
-) (binlogreplication.TableWriter, error) {
-	// if eventType == binlogreplication.InsertEvent {
-	// 	return twp.newTableAppender(ctx, databaseName, tableName, columnCount)
-	// }
-	return twp.newTableUpdater(ctx, databaseName, tableName, schema, columnCount, rowCount, identifyColumns, dataColumns, eventType)
-}
-
-func (twp *tableWriterProvider) newTableAppender(
-	ctx *sql.Context,
-	databaseName, tableName string,
-	columnCount int,
-) (*tableAppender, error) {
-	connector, err := duckdb.NewConnector(dbFilePath, nil)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := connector.Connect(ctx.Context)
-	if err != nil {
-		connector.Close()
-		return nil, err
-	}
-
-	appender, err := duckdb.NewAppenderFromConn(conn, databaseName, tableName)
-	if err != nil {
-		conn.Close()
-		connector.Close()
-		return nil, err
-	}
-
-	return &tableAppender{
-		connector: connector,
-		conn:      conn,
-		appender:  appender,
-		buffer:    make([]driver.Value, columnCount),
-	}, nil
-}
-
-type tableAppender struct {
-	connector *duckdb.Connector
-	conn      driver.Conn
-	appender  *duckdb.Appender
-	buffer    []driver.Value
-}
-
-var _ binlogreplication.TableWriter = &tableAppender{}
-
-func (ta *tableAppender) Insert(ctx *sql.Context, rows []sql.Row) error {
-	for _, row := range rows {
-		for i, v := range row {
-			ta.buffer[i] = v
-		}
-	}
-	return ta.appender.AppendRow(ta.buffer...)
-}
-
-func (ta *tableAppender) Delete(ctx *sql.Context, keyRows []sql.Row) error {
-	panic("not implemented")
-}
-
-func (ta *tableAppender) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []sql.Row) error {
-	panic("not implemented")
-}
-
-func (ta *tableAppender) Close() error {
-	defer ta.connector.Close()
-	defer ta.conn.Close()
-	return ta.appender.Close()
-}
+var ErrPartialPrimaryKeyUpdate = errors.New("primary key columns are (partially) updated but are not fully specified in the binlog")
 
 func isPkUpdate(schema sql.Schema, identifyColumns, dataColumns mysql.Bitmap) bool {
 	for i, c := range schema {
@@ -144,35 +24,41 @@ func isPkUpdate(schema sql.Schema, identifyColumns, dataColumns mysql.Bitmap) bo
 	return false
 }
 
+func getPrimaryKeyIndices(schema sql.Schema, columns mysql.Bitmap) []int {
+	var count int
+	var indices []int
+	for i, c := range schema {
+		set := columns.Count() > i && columns.Bit(i)
+		if c.PrimaryKey && !set {
+			return nil
+		} else if c.PrimaryKey && set {
+			indices = append(indices, count)
+		}
+		if set {
+			count++
+		}
+	}
+	return indices
+}
+
 func (twp *tableWriterProvider) newTableUpdater(
 	ctx *sql.Context,
 	databaseName, tableName string,
-	schema sql.Schema,
+	pkSchema sql.PrimaryKeySchema,
 	columnCount, rowCount int,
 	identifyColumns, dataColumns mysql.Bitmap,
-	eventType binlogreplication.EventType,
+	eventType binlog.RowEventType,
 ) (*tableUpdater, error) {
-	tx, err := twp.pool.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
+	schema := pkSchema.Schema
+	pkColumns := pkSchema.PkOrdinals
+	pkIndicesInIdentify := getPrimaryKeyIndices(schema, identifyColumns)
+	pkIndicesInData := getPrimaryKeyIndices(schema, dataColumns)
+	if len(pkIndicesInIdentify) == 0 && len(pkColumns) > 0 {
+		pkColumns = nil // disable primary key utilization
 	}
-
-	var identifyIndex int
-	var pkColumns []int
-	var pkIndices []int
-	for i, c := range schema {
-		identify := identifyColumns.Count() > i && identifyColumns.Bit(i)
-		if c.PrimaryKey && !identify {
-			pkColumns = nil
-			pkIndices = nil
-			break
-		} else if c.PrimaryKey && identify {
-			pkColumns = append(pkColumns, i)
-			pkIndices = append(pkIndices, identifyIndex)
-		}
-		if identify {
-			identifyIndex++
-		}
+	pkSubSchema := make(sql.Schema, len(pkColumns))
+	for i, idx := range pkColumns {
+		pkSubSchema[i] = schema[idx]
 	}
 
 	var (
@@ -180,41 +66,58 @@ func (twp *tableWriterProvider) newTableUpdater(
 		paramCount          int
 		pkUpdate            bool
 		replace             = false
-		reinsert            string
+		cleanup             string
 		fullTableName       = quoteIdentifier(databaseName) + "." + quoteIdentifier(tableName)
 		keyCount, dataCount = identifyColumns.BitCount(), dataColumns.BitCount()
 	)
 	switch eventType {
-	case binlogreplication.DeleteEvent:
+	case binlog.DeleteRowEvent:
 		sql, paramCount = buildDeleteTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns)
-	case binlogreplication.UpdateEvent:
+	case binlog.UpdateRowEvent:
 		pkUpdate = isPkUpdate(schema, identifyColumns, dataColumns)
 		if pkUpdate {
 			// If the primary key is being updated, we need to use DELETE + INSERT.
+			//
 			// For example, if the primary has executed `UPDATE t SET pk = pk + 1;`,
-			// then both `UPDATE` and `REPLACE` will fail on the replica because the primary key is being updated:
+			// then both `UPDATE` and `INSERT OR REPLACE` will fail on the replica because the primary key is being updated:
 			// - `UPDATE` will fail because of violation of the primary key constraint.
 			// - `REPLACE` will fail because it will insert a new row but leave the old row unchanged.
-			sql, paramCount = buildDeleteTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns)
-			reinsert, _ = buildInsertTemplate(fullTableName, columnCount, false)
+			//
+			// However, `DELETE` then `INSERT` in the same transaction will still fail
+			// due to the over-eager unique constraint checking in DuckDB, just like the `UPDATE` case.
+			//
+			// The only way to work around this without breaking atomicity is to do `INSERT OR REPLACE` first,
+			// then `DELETE` the old row if the primary key has actually been modified.
+			// This requires the occurrence of the primary key columns in both the `identifyColumns` and `dataColumns`.
+			if len(pkIndicesInIdentify) == 0 || len(pkIndicesInData) == 0 {
+				return nil, ErrPartialPrimaryKeyUpdate
+			}
+			sql, paramCount = buildInsertTemplate(fullTableName, columnCount, true)
+			cleanup, _ = buildDeleteTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns)
+			replace = true
 		} else if keyCount < columnCount || dataCount < columnCount {
 			sql, paramCount = buildUpdateTemplate(fullTableName, columnCount, schema, pkColumns, identifyColumns, dataColumns)
 		} else {
 			sql, paramCount = buildInsertTemplate(fullTableName, columnCount, true)
 			replace = true
 		}
-	case binlogreplication.InsertEvent:
+	case binlog.InsertRowEvent:
 		sql, paramCount = buildInsertTemplate(fullTableName, columnCount, false)
 	}
 
 	logrus.WithFields(logrus.Fields{
 		"sql":       sql,
 		"replace":   replace,
-		"reinsert":  reinsert,
+		"cleanup":   cleanup,
 		"keyCount":  keyCount,
 		"dataCount": dataCount,
 		"pkUpdate":  pkUpdate,
 	}).Infoln("Creating table updater...")
+
+	tx, err := twp.pool.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	stmt, err := tx.PrepareContext(ctx.Context, sql)
 	if err != nil {
@@ -227,9 +130,11 @@ func (twp *tableWriterProvider) newTableUpdater(
 		tx:         tx,
 		stmt:       stmt,
 		replace:    replace,
-		reinsert:   reinsert,
-		pkIndices:  pkIndices,
+		cleanup:    cleanup,
 		paramCount: paramCount,
+
+		pkIndicesInIdentify: pkIndicesInIdentify,
+		pkIndicesInData:     pkIndicesInData,
 	}, nil
 }
 
@@ -335,14 +240,18 @@ type tableUpdater struct {
 	tx         *stdsql.Tx
 	stmt       *stdsql.Stmt
 	replace    bool
-	reinsert   string
+	cleanup    string
 	paramCount int
-	pkIndices  []int
+
+	pkSubSchema         sql.Schema
+	pkIndicesInIdentify []int
+	pkIndicesInData     []int
 }
 
 var _ binlogreplication.TableWriter = &tableUpdater{}
 
 func (tu *tableUpdater) Insert(ctx *sql.Context, rows []sql.Row) error {
+	defer tu.stmt.Close()
 	for _, row := range rows {
 		if _, err := tu.stmt.ExecContext(ctx.Context, row...); err != nil {
 			return err
@@ -352,11 +261,12 @@ func (tu *tableUpdater) Insert(ctx *sql.Context, rows []sql.Row) error {
 }
 
 func (tu *tableUpdater) Delete(ctx *sql.Context, keyRows []sql.Row) error {
-	buf := make(sql.Row, len(tu.pkIndices))
+	defer tu.stmt.Close()
+	buf := make(sql.Row, len(tu.pkIndicesInIdentify))
 	for _, row := range keyRows {
 		var keys sql.Row
-		if len(tu.pkIndices) > 0 {
-			for i, idx := range tu.pkIndices {
+		if len(tu.pkIndicesInIdentify) > 0 {
+			for i, idx := range tu.pkIndicesInIdentify {
 				buf[i] = row[idx]
 			}
 			keys = buf
@@ -371,34 +281,12 @@ func (tu *tableUpdater) Delete(ctx *sql.Context, keyRows []sql.Row) error {
 }
 
 func (tu *tableUpdater) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []sql.Row) error {
-	if tu.replace {
+	if tu.replace && tu.cleanup == "" {
 		return tu.Insert(ctx, valueRows)
 	}
 
-	// https://duckdb.org/docs/sql/indexes#over-eager-unique-constraint-checking
-	if tu.reinsert != "" {
-		var err error
-		// DELETE
-		if err = tu.Delete(ctx, keyRows); err != nil {
-			return err
-		}
-		if err = tu.stmt.Close(); err != nil {
-			return err
-		}
-		if err = tu.tx.Commit(); err != nil {
-			return err
-		}
-
-		tu.tx, err = tu.pool.BeginTx(ctx.Context, nil)
-		if err != nil {
-			return err
-		}
-		tu.stmt, err = tu.tx.PrepareContext(ctx.Context, tu.reinsert)
-		if err != nil {
-			return err
-		}
-		// INSERT
-		return tu.Insert(ctx, valueRows)
+	if tu.cleanup != "" {
+		return tu.doInsertThenDelete(ctx, keyRows, valueRows)
 	}
 
 	// UPDATE t SET col1 = ?, col2 = ? WHERE key1 = ? AND key2 = ?
@@ -406,8 +294,8 @@ func (tu *tableUpdater) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []
 	for i, values := range valueRows {
 		keys := keyRows[i]
 		copy(buf, values)
-		if len(tu.pkIndices) > 0 {
-			for j, idx := range tu.pkIndices {
+		if len(tu.pkIndicesInIdentify) > 0 {
+			for j, idx := range tu.pkIndicesInIdentify {
 				buf[len(values)+j] = keys[idx]
 			}
 		} else {
@@ -421,9 +309,53 @@ func (tu *tableUpdater) Update(ctx *sql.Context, keyRows []sql.Row, valueRows []
 	return nil
 }
 
-func (tu *tableUpdater) Close() error {
-	defer tu.tx.Commit()
-	return tu.stmt.Close()
+// https://duckdb.org/docs/sql/indexes#over-eager-unique-constraint-checking
+// https://github.com/duckdb/duckdb/issues/14133
+func (tu *tableUpdater) doInsertThenDelete(ctx *sql.Context, beforeRows []sql.Row, afterRows []sql.Row) error {
+	var err error
+
+	// INSERT OR REPLACE
+	if err = tu.Insert(ctx, afterRows); err != nil {
+		return err
+	}
+
+	// DELETE if the primary key has actually been modified
+	stmt, err := tu.tx.PrepareContext(ctx.Context, tu.cleanup)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	beforeKey := make(sql.Row, len(tu.pkSubSchema))
+	afterKey := make(sql.Row, len(tu.pkSubSchema))
+	for i, before := range beforeRows {
+		after := afterRows[i]
+		for j, idx := range tu.pkIndicesInIdentify {
+			beforeKey[j] = before[idx]
+		}
+		for j, idx := range tu.pkIndicesInData {
+			afterKey[j] = after[idx]
+		}
+		if yes, err := beforeKey.Equals(afterKey, tu.pkSubSchema); err != nil {
+			return err
+		} else if yes {
+			// the row has already been deleted by the INSERT OR REPLACE statement
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx.Context, beforeKey...); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (tu *tableUpdater) Commit() error {
+	return tu.tx.Commit()
+}
+
+func (tu *tableUpdater) Rollback() error {
+	return tu.tx.Rollback()
 }
 
 func quoteIdentifier(identifier string) string {

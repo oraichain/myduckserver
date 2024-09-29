@@ -106,6 +106,13 @@ func (idx *Index) CanSupport(ranges ...sql.Range) bool {
 	return true
 }
 
+// CanSupportOrderBy returns whether this index can optimize ORDER BY a given expression type.
+// Verifying that the expression's children match the index columns are done separately.
+func (idx *Index) CanSupportOrderBy(expr sql.Expression) bool {
+	// Assuming true as default
+	return true
+}
+
 // PrefixLengths returns the prefix lengths for each column in this index
 func (idx *Index) PrefixLengths() []uint16 {
 	return idx.PrefixLens

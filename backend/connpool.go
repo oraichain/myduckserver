@@ -21,21 +21,28 @@ import (
 
 	"github.com/apecloud/myduckserver/catalog"
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/marcboeker/go-duckdb"
 	"github.com/sirupsen/logrus"
 )
 
 type ConnectionPool struct {
 	*stdsql.DB
-	catalog string
-	conns   sync.Map // concurrent-safe map[uint32]*stdsql.Conn
-	txns    sync.Map // concurrent-safe map[uint32]*stdsql.Tx
+	connector *duckdb.Connector
+	catalog   string
+	conns     sync.Map // concurrent-safe map[uint32]*stdsql.Conn
+	txns      sync.Map // concurrent-safe map[uint32]*stdsql.Tx
 }
 
-func NewConnectionPool(catalog string, db *stdsql.DB) *ConnectionPool {
+func NewConnectionPool(catalog string, connector *duckdb.Connector, db *stdsql.DB) *ConnectionPool {
 	return &ConnectionPool{
-		DB:      db,
-		catalog: catalog,
+		DB:        db,
+		connector: connector,
+		catalog:   catalog,
 	}
+}
+
+func (p *ConnectionPool) Connector() *duckdb.Connector {
+	return p.connector
 }
 
 func (p *ConnectionPool) GetConn(ctx context.Context, id uint32) (*stdsql.Conn, error) {

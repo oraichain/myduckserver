@@ -21,6 +21,7 @@ import (
 
 	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/catalog"
+	"github.com/apecloud/myduckserver/replica"
 	"github.com/apecloud/myduckserver/transpiler"
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/server"
@@ -69,7 +70,7 @@ func main() {
 	}
 	defer provider.Close()
 
-	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Storage())
+	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Connector(), provider.Storage())
 
 	engine := sqle.NewDefault(provider)
 
@@ -80,7 +81,7 @@ func main() {
 		logrus.Fatalln("Failed to set the persister:", err)
 	}
 
-	registerReplicaController(provider, engine, pool)
+	replica.RegisterReplicaController(provider, engine, pool)
 
 	config := server.Config{
 		Protocol: "tcp",

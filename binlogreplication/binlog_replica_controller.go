@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"vitess.io/vitess/go/mysql/sqlerror"
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
@@ -356,7 +357,7 @@ func (d *myBinlogReplicaController) GetReplicaStatus(ctx *sql.Context) (*binlogr
 	copy.ReplicateDoTables = d.filters.getDoTables()
 	copy.ReplicateIgnoreTables = d.filters.getIgnoreTables()
 
-	if d.applier.currentPosition != nil {
+	if !d.applier.currentPosition.IsZero() {
 		copy.ExecutedGtidSet = d.applier.currentPosition.GTIDSet.String()
 		copy.RetrievedGtidSet = copy.ExecutedGtidSet
 	}
@@ -405,7 +406,7 @@ func (d *myBinlogReplicaController) updateStatus(f func(status *binlogreplicatio
 }
 
 // setIoError updates the current replication status with the specific |errno| and |message| to describe an IO error.
-func (d *myBinlogReplicaController) setIoError(errno uint, message string) {
+func (d *myBinlogReplicaController) setIoError(errno sqlerror.ErrorCode, message string) {
 	d.statusMutex.Lock()
 	defer d.statusMutex.Unlock()
 
@@ -416,12 +417,12 @@ func (d *myBinlogReplicaController) setIoError(errno uint, message string) {
 
 	currentTime := time.Now()
 	d.status.LastIoErrorTimestamp = &currentTime
-	d.status.LastIoErrNumber = errno
+	d.status.LastIoErrNumber = uint(errno)
 	d.status.LastIoError = message
 }
 
 // setSqlError updates the current replication status with the specific |errno| and |message| to describe an SQL error.
-func (d *myBinlogReplicaController) setSqlError(errno uint, message string) {
+func (d *myBinlogReplicaController) setSqlError(errno sqlerror.ErrorCode, message string) {
 	d.statusMutex.Lock()
 	defer d.statusMutex.Unlock()
 
@@ -432,7 +433,7 @@ func (d *myBinlogReplicaController) setSqlError(errno uint, message string) {
 
 	currentTime := time.Now()
 	d.status.LastSqlErrorTimestamp = &currentTime
-	d.status.LastSqlErrNumber = errno
+	d.status.LastSqlErrNumber = uint(errno)
 	d.status.LastSqlError = message
 }
 
