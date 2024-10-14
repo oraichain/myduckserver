@@ -77,7 +77,7 @@ func (d *Database) tablesInsensitive(ctx *sql.Context, pattern string) ([]*Table
 }
 
 func (d *Database) findTables(ctx *sql.Context, pattern string) ([]*Table, error) {
-	rows, err := adapter.QueryCatalogContext(ctx, "SELECT DISTINCT table_name, comment FROM duckdb_tables() where database_name = ? and schema_name = ? and table_name ILIKE ?", d.catalog, d.name, pattern)
+	rows, err := adapter.QueryCatalog(ctx, "SELECT DISTINCT table_name, comment FROM duckdb_tables() where database_name = ? and schema_name = ? and table_name ILIKE ?", d.catalog, d.name, pattern)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
 	}
@@ -167,7 +167,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 		sqlsBuild.WriteString(s)
 	}
 
-	_, err := adapter.ExecContext(ctx, sqlsBuild.String())
+	_, err := adapter.Exec(ctx, sqlsBuild.String())
 	if err != nil {
 		if IsDuckDBTableAlreadyExistsError(err) {
 			return sql.ErrTableAlreadyExists.New(name)
@@ -185,7 +185,7 @@ func (d *Database) DropTable(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalog, d.name, name)))
+	_, err := adapter.Exec(ctx, fmt.Sprintf(`DROP TABLE %s`, FullTableName(d.catalog, d.name, name)))
 
 	if err != nil {
 		if IsDuckDBTableNotFoundError(err) {
@@ -201,7 +201,7 @@ func (d *Database) RenameTable(ctx *sql.Context, oldName string, newName string)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s RENAME TO "%s"`, FullTableName(d.catalog, d.name, oldName), newName))
+	_, err := adapter.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s RENAME TO "%s"`, FullTableName(d.catalog, d.name, oldName), newName))
 	if err != nil {
 		if IsDuckDBTableNotFoundError(err) {
 			return sql.ErrTableNotFound.New(oldName)
@@ -228,7 +228,7 @@ func (d *Database) extractViewDefinitions(ctx *sql.Context, schemaName string, v
 		args = append(args, viewName)
 	}
 
-	rows, err := adapter.QueryCatalogContext(ctx, query, args...)
+	rows, err := adapter.QueryCatalog(ctx, query, args...)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
 	}
@@ -281,7 +281,7 @@ func (d *Database) CreateView(ctx *sql.Context, name string, selectStatement str
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`USE %s; CREATE VIEW "%s" AS %s`, FullSchemaName(d.catalog, d.name), name, selectStatement))
+	_, err := adapter.Exec(ctx, fmt.Sprintf(`USE %s; CREATE VIEW "%s" AS %s`, FullSchemaName(d.catalog, d.name), name, selectStatement))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -293,7 +293,7 @@ func (d *Database) DropView(ctx *sql.Context, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := adapter.ExecContext(ctx, fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalog, d.name), name))
+	_, err := adapter.Exec(ctx, fmt.Sprintf(`USE %s; DROP VIEW "%s"`, FullSchemaName(d.catalog, d.name), name))
 	if err != nil {
 		if IsDuckDBViewNotFoundError(err) {
 			return sql.ErrViewDoesNotExist.New(name)

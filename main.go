@@ -43,12 +43,14 @@ var (
 	dataDirectory = "."
 	dbFileName    = "mysql.db"
 	dbFilePath    string
+	logLevel      = int(logrus.InfoLevel)
 )
 
 func init() {
 	flag.StringVar(&address, "address", address, "The address to bind to.")
 	flag.IntVar(&port, "port", port, "The port to bind to.")
 	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
+	flag.IntVar(&logLevel, "loglevel", logLevel, "The log level to use.")
 }
 
 func ensureSQLTranslate() {
@@ -60,6 +62,9 @@ func ensureSQLTranslate() {
 
 func main() {
 	flag.Parse()
+
+	logrus.SetLevel(logrus.Level(logLevel))
+
 	dbFilePath = filepath.Join(dataDirectory, dbFileName)
 
 	ensureSQLTranslate()
@@ -81,7 +86,7 @@ func main() {
 		logrus.Fatalln("Failed to set the persister:", err)
 	}
 
-	replica.RegisterReplicaController(provider, engine, pool)
+	replica.RegisterReplicaController(provider, engine, pool, builder)
 
 	config := server.Config{
 		Protocol: "tcp",

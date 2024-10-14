@@ -10,7 +10,7 @@ require (
 	github.com/dolthub/vitess v0.0.0-20240919225659-2ad81685e772
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jmoiron/sqlx v1.4.0
-	github.com/marcboeker/go-duckdb v1.8.1
+	github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697
 	github.com/prometheus/client_golang v1.20.3
 	github.com/rs/zerolog v1.33.0
 	github.com/shopspring/decimal v1.3.1

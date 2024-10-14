@@ -1,10 +1,10 @@
-package replica
+package delta
 
 import (
 	"bytes"
-	"context"
 	stdsql "database/sql"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,29 +13,37 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/ipc"
 	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/binlog"
-	"github.com/apecloud/myduckserver/binlogreplication"
 	"github.com/apecloud/myduckserver/catalog"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	"github.com/sirupsen/logrus"
 )
 
+type FlushStats struct {
+	DeltaSize  int64
+	Insertions int64
+	Deletions  int64
+}
+
 type DeltaController struct {
 	mutex  sync.Mutex
-	tables map[tableIdentifier]*deltaAppender
+	tables map[tableIdentifier]*DeltaAppender
 	pool   *backend.ConnectionPool
+}
+
+func NewController(pool *backend.ConnectionPool) *DeltaController {
+	return &DeltaController{
+		pool:   pool,
+		tables: make(map[tableIdentifier]*DeltaAppender),
+	}
 }
 
 func (c *DeltaController) GetDeltaAppender(
 	databaseName, tableName string,
 	schema sql.Schema,
-) (binlogreplication.DeltaAppender, error) {
+) (*DeltaAppender, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-
-	if c.tables == nil {
-		c.tables = make(map[tableIdentifier]*deltaAppender)
-	}
 
 	id := tableIdentifier{databaseName, tableName}
 	appender, ok := c.tables[id]
@@ -50,8 +58,18 @@ func (c *DeltaController) GetDeltaAppender(
 	return appender, nil
 }
 
+func (c *DeltaController) Close() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for k, da := range c.tables {
+		da.appender.Release()
+		delete(c.tables, k)
+	}
+}
+
 // Flush writes the accumulated changes to the database.
-func (c *DeltaController) Flush(ctx context.Context) error {
+func (c *DeltaController) Flush(ctx *sql.Context, tx *stdsql.Tx, reason FlushReason) (FlushStats, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -76,30 +94,53 @@ func (c *DeltaController) Flush(ctx context.Context) error {
 	// See:
 	//  https://duckdb.org/docs/sql/indexes.html#limitations-of-art-indexes
 	//  https://github.com/duckdb/duckdb/issues/14133
-
-	tx, err := c.pool.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Share the buffer among all tables.
-	buf := bytes.Buffer{}
+	var (
+		// Share the buffer among all tables.
+		buf   bytes.Buffer
+		stats FlushStats
+	)
 
 	for table, appender := range c.tables {
-		if err := c.updateTable(ctx, tx, table, appender, &buf); err != nil {
-			return err
+		deltaRowCount := appender.RowCount()
+		if deltaRowCount > 0 {
+			if err := c.updateTable(ctx, tx, table, appender, &buf, &stats); err != nil {
+				return stats, err
+			}
+		}
+		switch reason {
+		case DDLStmtFlushReason:
+			// DDL statement may change the schema
+			delete(c.tables, table)
+		default:
+			// Pre-allocate memory for the next delta
+			if deltaRowCount > 0 {
+				// Next power of 2
+				appender.Grow(1 << bits.Len64(uint64(deltaRowCount)-1))
+			}
 		}
 	}
-	return tx.Commit()
+
+	if stats.DeltaSize > 0 {
+		if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+			ctx.GetLogger().WithFields(logrus.Fields{
+				"DeltaSize":  stats.DeltaSize,
+				"Insertions": stats.Insertions,
+				"Deletions":  stats.Deletions,
+				"Reason":     reason.String(),
+			}).Trace("Flushed delta buffer")
+		}
+	}
+
+	return stats, nil
 }
 
 func (c *DeltaController) updateTable(
-	ctx context.Context,
+	ctx *sql.Context,
 	tx *stdsql.Tx,
 	table tableIdentifier,
-	appender *deltaAppender,
+	appender *DeltaAppender,
 	buf *bytes.Buffer,
+	stats *FlushStats,
 ) error {
 	buf.Reset()
 
@@ -107,16 +148,16 @@ func (c *DeltaController) updateTable(
 	record := appender.Build()
 	defer record.Release()
 
-	fmt.Println("record:", record)
+	// fmt.Println("record:", record)
 
 	// TODO(fan): Switch to zero-copy Arrow ingestion once this PR is merged:
 	//   https://github.com/marcboeker/go-duckdb/pull/283
 	w := ipc.NewWriter(buf, ipc.WithSchema(record.Schema()))
 	if err := w.Write(record); err != nil {
-		panic(err)
+		return err
 	}
 	if err := w.Close(); err != nil {
-		panic(err)
+		return err
 	}
 	bytes := buf.Bytes()
 	size := len(bytes)
@@ -145,7 +186,7 @@ func (c *DeltaController) updateTable(
 	// FROM (
 	//   SELECT
 	//     pk1, pk2, ...,
-	//     LAST(ROW(*COLUMNS(*)) ORDER BY txn_group, txn_seq, action) AS r
+	//     LAST(ROW(*COLUMNS(*)) ORDER BY txn_group, txn_seq, txn_stmt, action) AS r
 	//   FROM delta
 	//   GROUP BY pk1, pk2, ...
 	// )
@@ -170,7 +211,7 @@ func (c *DeltaController) updateTable(
 	}
 	builder.WriteString(" FROM (SELECT ")
 	builder.WriteString(pkList)
-	builder.WriteString(", LAST(ROW(*COLUMNS(*)) ORDER BY txn_group, txn_seq, action) AS r")
+	builder.WriteString(", LAST(ROW(*COLUMNS(*)) ORDER BY txn_group, txn_seq, txn_stmt, action) AS r")
 	builder.WriteString(ipcSQL)
 	builder.WriteString(" GROUP BY ")
 	builder.WriteString(pkList)
@@ -178,25 +219,28 @@ func (c *DeltaController) updateTable(
 	condenseDeltaSQL := builder.String()
 
 	var (
-		result       stdsql.Result
-		rowsAffected int64
-		err          error
+		result   stdsql.Result
+		affected int64
+		err      error
 	)
 
 	// Create a temporary table to store the latest delta view.
 	result, err = tx.ExecContext(ctx, "CREATE OR REPLACE TEMP TABLE delta AS "+condenseDeltaSQL)
 	if err == nil {
-		rowsAffected, err = result.RowsAffected()
+		affected, err = result.RowsAffected()
 	}
 	if err != nil {
 		return err
 	}
+	stats.DeltaSize += affected
 	defer tx.ExecContext(ctx, "DROP TABLE IF EXISTS temp.main.delta")
 
-	logrus.WithFields(logrus.Fields{
-		"table": qualifiedTableName,
-		"rows":  rowsAffected,
-	}).Infoln("Delta created")
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"table": qualifiedTableName,
+			"rows":  affected,
+		}).Trace("Delta created")
+	}
 
 	// Insert or replace new rows (action = INSERT) into the base table.
 	insertSQL := "INSERT OR REPLACE INTO " +
@@ -205,16 +249,19 @@ func (c *DeltaController) updateTable(
 		strconv.Itoa(int(binlog.InsertRowEvent))
 	result, err = tx.ExecContext(ctx, insertSQL)
 	if err == nil {
-		rowsAffected, err = result.RowsAffected()
+		affected, err = result.RowsAffected()
 	}
 	if err != nil {
 		return err
 	}
+	stats.Insertions += affected
 
-	logrus.WithFields(logrus.Fields{
-		"table": qualifiedTableName,
-		"rows":  rowsAffected,
-	}).Infoln("Inserted")
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"table": qualifiedTableName,
+			"rows":  affected,
+		}).Trace("Inserted")
+	}
 
 	// Delete rows that have been deleted.
 	// The plan for `IN` is optimized to a SEMI JOIN,
@@ -230,16 +277,19 @@ func (c *DeltaController) updateTable(
 		"FROM temp.main.delta WHERE action = " + strconv.Itoa(int(binlog.DeleteRowEvent)) + ")"
 	result, err = tx.ExecContext(ctx, deleteSQL)
 	if err == nil {
-		rowsAffected, err = result.RowsAffected()
+		affected, err = result.RowsAffected()
 	}
 	if err != nil {
 		return err
 	}
+	stats.Deletions += affected
 
-	logrus.WithFields(logrus.Fields{
-		"table": qualifiedTableName,
-		"rows":  rowsAffected,
-	}).Infoln("Deleted")
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"table": qualifiedTableName,
+			"rows":  affected,
+		}).Trace("Deleted")
+	}
 
 	return nil
 }

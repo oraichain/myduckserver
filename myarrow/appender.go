@@ -31,6 +31,15 @@ func (a *ArrowAppender) Build() arrow.Record {
 	return a.RecordBuilder.NewRecord()
 }
 
+// Grow increases the capacity of the builder to at least n rows.
+// This method is intended to be used to preallocate memory for the builder
+// after Build() has been called.
+func (a *ArrowAppender) Grow(n int) {
+	for _, b := range a.RecordBuilder.Fields() {
+		b.Reserve(n)
+	}
+}
+
 func (a *ArrowAppender) Append(row sql.Row) error {
 	for i, b := range a.RecordBuilder.Fields() {
 		v := row[i]

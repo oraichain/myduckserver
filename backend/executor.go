@@ -31,6 +31,8 @@ import (
 type DuckBuilder struct {
 	base sql.NodeExecBuilder
 	pool *ConnectionPool
+
+	FlushDeltaBuffer func() error
 }
 
 var _ sql.NodeExecBuilder = (*DuckBuilder)(nil)
@@ -43,6 +45,14 @@ func NewDuckBuilder(base sql.NodeExecBuilder, pool *ConnectionPool) *DuckBuilder
 }
 
 func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.RowIter, error) {
+	// Flush the delta buffer before executing the query.
+	// TODO(fan): Be fine-grained and flush only when the replicated tables are touched.
+	if b.FlushDeltaBuffer != nil {
+		if err := b.FlushDeltaBuffer(); err != nil {
+			return nil, err
+		}
+	}
+
 	n := root
 	qp, ok := n.(*plan.QueryProcess)
 	if ok {
@@ -59,7 +69,7 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	ctx.GetLogger().WithFields(logrus.Fields{
 		"Query":    ctx.Query(),
 		"NodeType": fmt.Sprintf("%T", n),
-	}).Infoln("Building node:", n)
+	}).Trace("Building node:", n)
 
 	// TODO; find a better way to fallback to the base builder
 	switch n.(type) {
@@ -130,7 +140,7 @@ func (b *DuckBuilder) executeExpressioner(ctx *sql.Context, n sql.Expressioner, 
 }
 
 func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Conn) (sql.RowIter, error) {
-	logrus.Infoln("Executing Query...")
+	ctx.GetLogger().Trace("Executing Query...")
 
 	var (
 		duckSQL string
@@ -148,10 +158,10 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 		return nil, catalog.ErrTranspiler.New(err)
 	}
 
-	logrus.WithFields(logrus.Fields{
+	ctx.GetLogger().WithFields(logrus.Fields{
 		"Query":   ctx.Query(),
 		"DuckSQL": duckSQL,
-	}).Infoln("Executing Query...")
+	}).Trace("Executing Query...")
 
 	// Execute the DuckDB query
 	rows, err := conn.QueryContext(ctx.Context, duckSQL)
@@ -169,10 +179,10 @@ func (b *DuckBuilder) executeDML(ctx *sql.Context, conn *stdsql.Conn) (sql.RowIt
 		return nil, catalog.ErrTranspiler.New(err)
 	}
 
-	logrus.WithFields(logrus.Fields{
+	ctx.GetLogger().WithFields(logrus.Fields{
 		"Query":   ctx.Query(),
 		"DuckSQL": duckSQL,
-	}).Infoln("Executing DML...")
+	}).Trace("Executing DML...")
 
 	// Execute the DuckDB query
 	result, err := conn.ExecContext(ctx.Context, duckSQL)

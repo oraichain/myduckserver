@@ -225,6 +225,8 @@ github.com/marcboeker/go-duckdb v1.8.0 h1:iOWv1wTL0JIMqpyns6hCf5XJJI4fY6lmJNk+it
 github.com/marcboeker/go-duckdb v1.8.0/go.mod h1:2oV8BZv88S16TKGKM+Lwd0g7DX84x0jMxjTInThC8Is=
 github.com/marcboeker/go-duckdb v1.8.1 h1:jQjvsN49PNZC9IJLCIMjfD3lMO0QERKNYeZwhyVA8UY=
 github.com/marcboeker/go-duckdb v1.8.1/go.mod h1:2oV8BZv88S16TKGKM+Lwd0g7DX84x0jMxjTInThC8Is=
+github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697 h1:PU2n7bbll9b4erOPDi4z08JJsICs4L0jeNhr/dZV1So=
+github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697/go.mod h1:2oV8BZv88S16TKGKM+Lwd0g7DX84x0jMxjTInThC8Is=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
 github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxecdEvA=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=

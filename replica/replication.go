@@ -15,6 +15,7 @@ package replica
 
 import (
 	"context"
+	stdsql "database/sql"
 
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/memory"
@@ -26,11 +27,12 @@ import (
 	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/binlogreplication"
 	"github.com/apecloud/myduckserver/catalog"
+	"github.com/apecloud/myduckserver/delta"
 )
 
 // registerReplicaController registers the replica controller into the engine
 // to handle the replication commands, such as START REPLICA, STOP REPLICA, etc.
-func RegisterReplicaController(provider *catalog.DatabaseProvider, engine *sqle.Engine, pool *backend.ConnectionPool) {
+func RegisterReplicaController(provider *catalog.DatabaseProvider, engine *sqle.Engine, pool *backend.ConnectionPool, builder *backend.DuckBuilder) {
 	replica := binlogreplication.MyBinlogReplicaController
 	replica.SetEngine(engine)
 
@@ -40,8 +42,10 @@ func RegisterReplicaController(provider *catalog.DatabaseProvider, engine *sqle.
 	replica.SetExecutionContext(ctx)
 
 	twp := &tableWriterProvider{pool: pool}
-	twp.delta.pool = pool
+	twp.controller = delta.NewController(pool)
+
 	replica.SetTableWriterProvider(twp)
+	builder.FlushDeltaBuffer = nil // TODO: implement this
 
 	engine.Analyzer.Catalog.BinlogReplicaController = binlogreplication.MyBinlogReplicaController
 
@@ -52,14 +56,15 @@ func RegisterReplicaController(provider *catalog.DatabaseProvider, engine *sqle.
 }
 
 type tableWriterProvider struct {
-	pool  *backend.ConnectionPool
-	delta DeltaController
+	pool       *backend.ConnectionPool
+	controller *delta.DeltaController
 }
 
 var _ binlogreplication.TableWriterProvider = &tableWriterProvider{}
 
 func (twp *tableWriterProvider) GetTableWriter(
-	ctx *sql.Context, engine *sqle.Engine,
+	ctx *sql.Context,
+	txn *stdsql.Tx,
 	databaseName, tableName string,
 	schema sql.PrimaryKeySchema,
 	columnCount, rowCount int,
@@ -67,20 +72,22 @@ func (twp *tableWriterProvider) GetTableWriter(
 	eventType binlog.RowEventType,
 	foreignKeyChecksDisabled bool,
 ) (binlogreplication.TableWriter, error) {
-	// if eventType == binlogreplication.InsertEvent {
-	// 	return twp.newTableAppender(ctx, databaseName, tableName, columnCount)
-	// }
-	return twp.newTableUpdater(ctx, databaseName, tableName, schema, columnCount, rowCount, identifyColumns, dataColumns, eventType)
+	return twp.newTableUpdater(ctx, txn, databaseName, tableName, schema, columnCount, rowCount, identifyColumns, dataColumns, eventType)
 }
 
 func (twp *tableWriterProvider) GetDeltaAppender(
-	ctx *sql.Context, engine *sqle.Engine,
+	ctx *sql.Context,
 	databaseName, tableName string,
 	schema sql.Schema,
 ) (binlogreplication.DeltaAppender, error) {
-	return twp.delta.GetDeltaAppender(databaseName, tableName, schema)
+	return twp.controller.GetDeltaAppender(databaseName, tableName, schema)
 }
 
-func (twp *tableWriterProvider) FlushDelta(ctx *sql.Context) error {
-	return twp.delta.Flush(ctx)
+func (twp *tableWriterProvider) FlushDeltaBuffer(ctx *sql.Context, tx *stdsql.Tx, reason delta.FlushReason) error {
+	_, err := twp.controller.Flush(ctx, tx, reason)
+	return err
+}
+
+func (twp *tableWriterProvider) DiscardDeltaBuffer(ctx *sql.Context) {
+	twp.controller.Close()
 }

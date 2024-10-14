@@ -119,6 +119,14 @@ func (p *ConnectionPool) GetTxn(ctx context.Context, id uint32, schemaName strin
 	return tx, nil
 }
 
+func (p *ConnectionPool) TryGetTxn(id uint32) *stdsql.Tx {
+	entry, ok := p.txns.Load(id)
+	if !ok {
+		return nil
+	}
+	return entry.(*stdsql.Tx)
+}
+
 func (p *ConnectionPool) CloseTxn(id uint32) {
 	p.txns.Delete(id)
 }

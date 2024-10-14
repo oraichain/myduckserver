@@ -15,6 +15,7 @@
 package binlogreplication
 
 import (
+	stdsql "database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -23,94 +24,67 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/apecloud/myduckserver/adapter"
+	"github.com/apecloud/myduckserver/catalog"
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"vitess.io/vitess/go/mysql/replication"
 )
 
 const binlogPositionDirectory = ".replica"
-const binlogPositionFilename = "binlog-position"
 const mysqlFlavor = "MySQL56"
+const defaultChannelName = ""
 
-// binlogPositionStore manages loading and saving data to the binlog position file stored on disk. This provides
+// binlogPositionStore manages loading and saving data to the binlog position metadata table. This provides
 // durable storage for the set of GTIDs that have been successfully executed on the replica, so that the replica
 // server can be restarted and resume binlog event messages at the correct point.
 type binlogPositionStore struct {
 	mu sync.Mutex
 }
 
-// Load loads a mysql.Position instance from the .replica/binlog-position file at the root of working directory
-// This file MUST be stored at the root of the provider's filesystem, and NOT inside a nested database's .replica directory,
-// since the binlog position contains events that cover all databases in a SQL server. The returned mysql.Position
-// represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
-// default binlog channel ("") is supported. If no .replica/binlog-position file is stored, this method returns a nil
-// mysql.Position and a nil error. If any errors are encountered, a nil mysql.Position and an error are returned.
-func (store *binlogPositionStore) Load(engine *gms.Engine) (pos replication.Position, err error) {
+// Load loads a mysql.Position instance from the database. The returned mysql.Position
+// represents the set of GTIDs that have been successfully executed and applied on this replica.
+// Currently only the default binlog channel ("") is supported.
+// If no position is stored, this method returns a zero mysql.Position and a nil error.
+// If any errors are encountered, a nil mysql.Position and an error are returned.
+func (store *binlogPositionStore) Load(ctx *sql.Context, engine *gms.Engine) (pos replication.Position, err error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	dir := filepath.Join(getDataDir(engine), binlogPositionDirectory)
-	_, err = os.Stat(dir)
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return pos, nil
+	var positionString string
+	err = adapter.QueryRowCatalog(ctx, catalog.InternalTables.BinlogPosition.SelectStmt(), defaultChannelName).Scan(&positionString)
+	if err == stdsql.ErrNoRows {
+		return replication.Position{}, nil
 	} else if err != nil {
-		return pos, err
+		return replication.Position{}, fmt.Errorf("unable to load binlog position: %w", err)
 	}
-
-	_, err = os.Stat(filepath.Join(dir, binlogPositionFilename))
-	if err != nil && errors.Is(err, fs.ErrNotExist) {
-		return pos, nil
-	} else if err != nil {
-		return pos, err
-	}
-
-	filePath, err := filepath.Abs(filepath.Join(dir, binlogPositionFilename))
-	if err != nil {
-		return pos, err
-	}
-
-	bytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return pos, err
-	}
-	positionString := string(bytes)
 
 	// Strip off the "MySQL56/" prefix
-	prefix := "MySQL56/"
-	if strings.HasPrefix(positionString, prefix) {
-		positionString = string(bytes[len(prefix):])
-	}
+	positionString = strings.TrimPrefix(positionString, "MySQL56/")
 
 	return replication.ParsePosition(mysqlFlavor, positionString)
 }
 
-// Save saves the specified |position| to disk in the .replica/binlog-position file at the root of the provider's
-// filesystem. This file MUST be stored at the root of the provider's filesystem, and NOT inside a nested database's
-// .replica directory, since the binlog position contains events that cover all databases in a SQL server. |position|
-// represents the set of GTIDs that have been successfully executed and applied on this replica. Currently only the
-// default binlog channel ("") is supported. If any errors are encountered persisting the position to disk, an
-// error is returned.
+// Save persists the specified |position| to disk.
+// The |position| represents the set of GTIDs that have been successfully executed and applied on this replica.
+// Currently only the default binlog channel ("") is supported.
+// If any errors are encountered persisting the position to disk, an error is returned.
 func (store *binlogPositionStore) Save(ctx *sql.Context, engine *gms.Engine, position replication.Position) error {
 	if position.IsZero() {
-		return fmt.Errorf("unable to save binlog position: nil position passed")
+		return fmt.Errorf("unable to save binlog position: empty position passed")
 	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	// The .replica dir may not exist yet, so create it if necessary.
-	dir, err := createReplicaDir(engine)
-	if err != nil {
-		return err
+	if _, err := adapter.ExecCatalogInTxn(
+		ctx,
+		catalog.InternalTables.BinlogPosition.UpsertStmt(),
+		defaultChannelName, position.String(),
+	); err != nil {
+		return fmt.Errorf("unable to save binlog position: %w", err)
 	}
-
-	filePath, err := filepath.Abs(filepath.Join(dir, binlogPositionFilename))
-	if err != nil {
-		return err
-	}
-
-	encodedPosition := replication.EncodePosition(position)
-	return os.WriteFile(filePath, []byte(encodedPosition), 0666)
+	return nil
 }
 
 // Delete deletes the stored mysql.Position information stored in .replica/binlog-position in the root of the provider's
@@ -120,7 +94,8 @@ func (store *binlogPositionStore) Delete(ctx *sql.Context, engine *gms.Engine) e
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
-	return os.Remove(filepath.Join(getDataDir(engine), binlogPositionDirectory, binlogPositionFilename))
+	_, err := adapter.ExecCatalogInTxn(ctx, catalog.InternalTables.BinlogPosition.DeleteStmt(), defaultChannelName)
+	return err
 }
 
 // createReplicaDir creates the .replica directory if it doesn't already exist.

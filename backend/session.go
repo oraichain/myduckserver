@@ -39,11 +39,6 @@ func NewSession(base *memory.Session, provider *catalog.DatabaseProvider, pool *
 
 // NewSessionBuilder returns a session builder for the given database provider.
 func NewSessionBuilder(provider *catalog.DatabaseProvider, pool *ConnectionPool) func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
-	_, err := pool.Exec("CREATE TABLE IF NOT EXISTS main.persistent_variables (name TEXT PRIMARY KEY, value TEXT, type TEXT)")
-	if err != nil {
-		panic(err)
-	}
-
 	return func(ctx context.Context, conn *mysql.Conn, addr string) (sql.Session, error) {
 		host := ""
 		user := ""
@@ -73,7 +68,7 @@ var _ sql.Transaction = (*Transaction)(nil)
 
 // StartTransaction implements sql.TransactionSession.
 func (sess Session) StartTransaction(ctx *sql.Context, tCharacteristic sql.TransactionCharacteristic) (sql.Transaction, error) {
-	sess.GetLogger().Infoln("StartTransaction")
+	sess.GetLogger().Trace("StartTransaction")
 	base, err := sess.Session.StartTransaction(ctx, tCharacteristic)
 	if err != nil {
 		return nil, err
@@ -93,7 +88,7 @@ func (sess Session) StartTransaction(ctx *sql.Context, tCharacteristic sql.Trans
 
 	var tx *stdsql.Tx
 	if startUnderlyingTx {
-		sess.GetLogger().Infoln("StartDuckTransaction")
+		sess.GetLogger().Trace("StartDuckTransaction")
 		tx, err = sess.GetTxn(ctx, &stdsql.TxOptions{ReadOnly: tCharacteristic == sql.ReadOnly})
 		if err != nil {
 			return nil, err
@@ -104,10 +99,10 @@ func (sess Session) StartTransaction(ctx *sql.Context, tCharacteristic sql.Trans
 
 // CommitTransaction implements sql.TransactionSession.
 func (sess Session) CommitTransaction(ctx *sql.Context, tx sql.Transaction) error {
-	sess.GetLogger().Infoln("CommitTransaction")
+	sess.GetLogger().Trace("CommitTransaction")
 	transaction := tx.(*Transaction)
 	if transaction.tx != nil {
-		sess.GetLogger().Infoln("CommitDuckTransaction")
+		sess.GetLogger().Trace("CommitDuckTransaction")
 		defer sess.CloseTxn()
 		if err := transaction.tx.Commit(); err != nil {
 			return err
@@ -118,10 +113,10 @@ func (sess Session) CommitTransaction(ctx *sql.Context, tx sql.Transaction) erro
 
 // Rollback implements sql.TransactionSession.
 func (sess Session) Rollback(ctx *sql.Context, tx sql.Transaction) error {
-	sess.GetLogger().Infoln("Rollback")
+	sess.GetLogger().Trace("Rollback")
 	transaction := tx.(*Transaction)
 	if transaction.tx != nil {
-		sess.GetLogger().Infoln("RollbackDuckTransaction")
+		sess.GetLogger().Trace("RollbackDuckTransaction")
 		defer sess.CloseTxn()
 		if err := transaction.tx.Rollback(); err != nil {
 			return err
@@ -137,7 +132,7 @@ func (sess Session) PersistGlobal(sysVarName string, value interface{}) error {
 	}
 	_, err := sess.ExecContext(
 		context.Background(),
-		"INSERT OR REPLACE INTO main.persistent_variables (name, value, vtype) VALUES (?, ?, ?)",
+		catalog.InternalTables.PersistentVariable.UpsertStmt(),
 		sysVarName, value, fmt.Sprintf("%T", value),
 	)
 	return err
@@ -147,7 +142,7 @@ func (sess Session) PersistGlobal(sysVarName string, value interface{}) error {
 func (sess Session) RemovePersistedGlobal(sysVarName string) error {
 	_, err := sess.ExecContext(
 		context.Background(),
-		"DELETE FROM main.persistent_variables WHERE name = ?",
+		catalog.InternalTables.PersistentVariable.DeleteStmt(),
 		sysVarName,
 	)
 	return err
@@ -155,7 +150,7 @@ func (sess Session) RemovePersistedGlobal(sysVarName string) error {
 
 // RemoveAllPersistedGlobals implements sql.PersistableSession.
 func (sess Session) RemoveAllPersistedGlobals() error {
-	_, err := sess.ExecContext(context.Background(), "DELETE FROM main.persistent_variables")
+	_, err := sess.ExecContext(context.Background(), "DELETE FROM "+catalog.InternalTables.PersistentVariable.Name)
 	return err
 }
 
@@ -164,7 +159,8 @@ func (sess Session) GetPersistedValue(k string) (interface{}, error) {
 	var value, vtype string
 	err := sess.QueryRow(
 		context.Background(),
-		"SELECT value, vtype FROM main.persistent_variables WHERE name = ?", k,
+		catalog.InternalTables.PersistentVariable.SelectStmt(),
+		k,
 	).Scan(&value, &vtype)
 	switch {
 	case err == stdsql.ErrNoRows:
@@ -195,10 +191,22 @@ func (sess Session) GetCatalogConn(ctx context.Context) (*stdsql.Conn, error) {
 	return sess.pool.GetConn(ctx, sess.ID())
 }
 
+// GetTxn implements adapter.ConnectionHolder.
 func (sess Session) GetTxn(ctx context.Context, options *stdsql.TxOptions) (*stdsql.Tx, error) {
 	return sess.pool.GetTxn(ctx, sess.ID(), sess.GetCurrentDatabase(), options)
 }
 
+// GetCatalogTxn implements adapter.ConnectionHolder.
+func (sess Session) GetCatalogTxn(ctx context.Context, options *stdsql.TxOptions) (*stdsql.Tx, error) {
+	return sess.pool.GetTxn(ctx, sess.ID(), "", options)
+}
+
+// TryGetTxn implements adapter.ConnectionHolder.
+func (sess Session) TryGetTxn() *stdsql.Tx {
+	return sess.pool.TryGetTxn(sess.ID())
+}
+
+// CloseTxn implements adapter.ConnectionHolder.
 func (sess Session) CloseTxn() {
 	sess.pool.CloseTxn(sess.ID())
 }

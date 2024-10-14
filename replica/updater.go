@@ -43,6 +43,7 @@ func getPrimaryKeyIndices(schema sql.Schema, columns mysql.Bitmap) []int {
 
 func (twp *tableWriterProvider) newTableUpdater(
 	ctx *sql.Context,
+	txn *stdsql.Tx,
 	databaseName, tableName string,
 	pkSchema sql.PrimaryKeySchema,
 	columnCount, rowCount int,
@@ -114,20 +115,13 @@ func (twp *tableWriterProvider) newTableUpdater(
 		"pkUpdate":  pkUpdate,
 	}).Infoln("Creating table updater...")
 
-	tx, err := twp.pool.BeginTx(ctx, nil)
+	stmt, err := txn.PrepareContext(ctx.Context, sql)
 	if err != nil {
-		return nil, err
-	}
-
-	stmt, err := tx.PrepareContext(ctx.Context, sql)
-	if err != nil {
-		tx.Rollback()
 		return nil, err
 	}
 
 	return &tableUpdater{
 		pool:       twp.pool,
-		tx:         tx,
 		stmt:       stmt,
 		replace:    replace,
 		cleanup:    cleanup,
@@ -348,14 +342,6 @@ func (tu *tableUpdater) doInsertThenDelete(ctx *sql.Context, beforeRows []sql.Ro
 	}
 
 	return nil
-}
-
-func (tu *tableUpdater) Commit() error {
-	return tu.tx.Commit()
-}
-
-func (tu *tableUpdater) Rollback() error {
-	return tu.tx.Rollback()
 }
 
 func quoteIdentifier(identifier string) string {

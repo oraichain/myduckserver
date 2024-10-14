@@ -143,7 +143,7 @@ func (t *Table) PrimaryKeySchema() sql.PrimaryKeySchema {
 }
 
 func getPrimaryKeyOrdinals(ctx *sql.Context, catalogName, dbName, tableName string) []int {
-	rows, err := adapter.QueryCatalogContext(ctx, `
+	rows, err := adapter.QueryCatalog(ctx, `
 		SELECT constraint_column_indexes FROM duckdb_constraints() WHERE database_name = ? AND schema_name = ? AND table_name = ? AND constraint_type = 'PRIMARY KEY' LIMIT 1
 	`, catalogName, dbName, tableName)
 	if err != nil {
@@ -193,7 +193,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 	comment := NewCommentWithMeta(column.Comment, typ.mysql)
 	sql += fmt.Sprintf(`; COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalog, t.db.name, t.name, column.Name), comment.Encode())
 
-	_, err = adapter.ExecContext(ctx, sql)
+	_, err = adapter.Exec(ctx, sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -208,7 +208,7 @@ func (t *Table) DropColumn(ctx *sql.Context, columnName string) error {
 
 	sql := fmt.Sprintf(`ALTER TABLE %s DROP COLUMN "%s"`, FullTableName(t.db.catalog, t.db.name, t.name), columnName)
 
-	_, err := adapter.ExecContext(ctx, sql)
+	_, err := adapter.Exec(ctx, sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -256,7 +256,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	sqls = append(sqls, fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalog, t.db.name, t.name, column.Name), comment.Encode()))
 
 	joinedSQL := strings.Join(sqls, "; ")
-	_, err = adapter.ExecContext(ctx, joinedSQL)
+	_, err = adapter.Exec(ctx, joinedSQL)
 	if err != nil {
 		logrus.Errorf("run duckdb sql failed: %s", joinedSQL)
 		return ErrDuckDB.New(err)
@@ -361,7 +361,7 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 	}
 
 	// Execute the SQL statement to create the index
-	_, err := adapter.ExecContext(ctx, sqlsBuilder.String())
+	_, err := adapter.Exec(ctx, sqlsBuilder.String())
 	if err != nil {
 		if IsDuckDBIndexAlreadyExistsError(err) {
 			return sql.ErrDuplicateKey.New(indexDef.Name)
@@ -388,7 +388,7 @@ func (t *Table) DropIndex(ctx *sql.Context, indexName string) error {
 		EncodeIndexName(t.name, indexName))
 
 	// Execute the SQL statement to drop the index
-	_, err := adapter.ExecContext(ctx, sql)
+	_, err := adapter.Exec(ctx, sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -408,7 +408,7 @@ func (t *Table) GetIndexes(ctx *sql.Context) ([]sql.Index, error) {
 	defer t.mu.RUnlock()
 
 	// Query to get the indexes for the table
-	rows, err := adapter.QueryCatalogContext(ctx, `SELECT index_name, is_unique, comment, sql FROM duckdb_indexes() WHERE database_name = ? AND schema_name = ? AND table_name = ?`,
+	rows, err := adapter.QueryCatalog(ctx, `SELECT index_name, is_unique, comment, sql FROM duckdb_indexes() WHERE database_name = ? AND schema_name = ? AND table_name = ?`,
 		t.db.catalog, t.db.name, t.name)
 	if err != nil {
 		return nil, ErrDuckDB.New(err)
@@ -486,7 +486,7 @@ func (t *Table) Comment() string {
 }
 
 func queryColumns(ctx *sql.Context, catalogName, schemaName, tableName string) ([]*ColumnInfo, error) {
-	rows, err := adapter.QueryCatalogContext(ctx, `
+	rows, err := adapter.QueryCatalog(ctx, `
 		SELECT column_name, column_index, data_type, is_nullable, column_default, comment, numeric_precision, numeric_scale
 		FROM duckdb_columns() 
 		WHERE database_name = ? AND schema_name = ? AND table_name = ?

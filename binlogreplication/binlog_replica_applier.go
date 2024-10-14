@@ -15,6 +15,7 @@
 package binlogreplication
 
 import (
+	stdsql "database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -24,11 +25,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apecloud/myduckserver/adapter"
 	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/charset"
+	"github.com/apecloud/myduckserver/delta"
+	"github.com/apecloud/myduckserver/mysqlutil"
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/binlogreplication"
+	"github.com/dolthub/go-mysql-server/sql/plan"
 	"github.com/dolthub/go-mysql-server/sql/types"
 	doltvtmysql "github.com/dolthub/vitess/go/mysql"
 	"github.com/sirupsen/logrus"
@@ -62,7 +67,16 @@ type binlogReplicaApplier struct {
 	filters               *filterConfiguration
 	running               atomic.Bool
 	engine                *gms.Engine
-	tableWriterProvider   TableWriterProvider
+
+	tableWriterProvider TableWriterProvider
+	previousGtid        replication.GTID
+	pendingPosition     replication.Position
+	ongoingBatchTxn     atomic.Bool   // true if we're in a batched transaction, i.e., a series of binlog-format=ROW primary transactions
+	dirtyTxn            atomic.Bool   // true if we're in a transaction that is opened and/or has uncommited changes
+	dirtyStream         atomic.Bool   // true if the binlog stream does not end with a commit event
+	inTxnStmtID         atomic.Uint64 // auto-incrementing ID for statements within a transaction
+	deltaBufSize        atomic.Uint64 // size of the delta buffer
+	lastCommitTime      time.Time     // time of the last commit
 }
 
 func newBinlogReplicaApplier(filters *filterConfiguration) *binlogReplicaApplier {
@@ -190,7 +204,7 @@ func (a *binlogReplicaApplier) startReplicationEventStream(ctx *sql.Context, con
 		return err
 	}
 
-	position, err := positionStore.Load(a.engine)
+	position, err := positionStore.Load(ctx, a.engine)
 	if err != nil {
 		return err
 	}
@@ -235,10 +249,25 @@ func (a *binlogReplicaApplier) startReplicationEventStream(ctx *sql.Context, con
 	}
 
 	a.currentPosition = position
+	a.pendingPosition = position
+	if err := sql.SystemVariables.AssignValues(map[string]interface{}{"gtid_executed": a.currentPosition.GTIDSet.String()}); err != nil {
+		ctx.GetLogger().Errorf("unable to set @@GLOBAL.gtid_executed: %s", err.Error())
+	}
 
 	// Clear out the format description in case we're reconnecting, so that we don't use the old format description
 	// to interpret any event messages before we receive the new format description from the new stream.
 	a.format = nil
+
+	// Clear out the transactional states and the delta buffer
+	a.previousGtid = nil
+	a.currentGtid = nil
+	a.ongoingBatchTxn.Store(false)
+	a.dirtyTxn.Store(false)
+	a.dirtyStream.Store(false)
+	a.inTxnStmtID.Store(0)
+	a.lastCommitTime = time.Now()
+	a.tableWriterProvider.DiscardDeltaBuffer(ctx)
+	a.deltaBufSize.Store(0)
 
 	// If the source server has binlog checksums enabled (@@global.binlog_checksum), then the replica MUST
 	// set @master_binlog_checksum to handshake with the server to acknowledge that it knows that checksums
@@ -259,7 +288,7 @@ func (a *binlogReplicaApplier) startReplicationEventStream(ctx *sql.Context, con
 		"serverId":   serverId,
 		"binlogFile": binlogFile,
 		"position":   position.String(),
-	}).Infoln("Sending binlog dump command to source")
+	}).Trace("Sending binlog dump command to source")
 
 	return conn.SendBinlogDumpCommand(serverId, binlogFile, position)
 }
@@ -271,6 +300,9 @@ func (a *binlogReplicaApplier) replicaBinlogEventHandler(ctx *sql.Context) error
 
 	var conn *mysql.Conn
 	var eventProducer *binlogEventProducer
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 
 	// Process binlog events
 	for {
@@ -316,24 +348,40 @@ func (a *binlogReplicaApplier) replicaBinlogEventHandler(ctx *sql.Context) error
 				}
 			} else {
 				// otherwise, log the error if it's something we don't expect and continue
-				ctx.GetLogger().Errorf("unexpected error of type %T: '%v'", err, err.Error())
-				MyBinlogReplicaController.setIoError(sqlerror.ERUnknownError, err.Error())
+				recordReplicationError(ctx, err)
+			}
+
+		case <-ticker.C:
+			if a.ongoingBatchTxn.Load() && !a.dirtyStream.Load() {
+				// We should commit the transaction to flush the changes to the database
+				// if we're in a batched transaction and haven't seen any changes for a while.
+				if err := a.extendOrCommitBatchTxn(ctx, engine); err != nil {
+					recordReplicationError(ctx, err)
+				}
 			}
 
 		case <-a.stopReplicationChan:
 			ctx.GetLogger().Trace("received stop replication signal")
 			eventProducer.Stop()
+			if a.ongoingBatchTxn.Load() && !a.dirtyStream.Load() {
+				if err := a.commitOngoingTxn(ctx, engine, NormalCommit, delta.OnCloseFlushReason); err != nil {
+					recordReplicationError(ctx, err)
+				}
+			}
 			return nil
 		}
 	}
+}
+
+func recordReplicationError(ctx *sql.Context, err error) {
+	ctx.GetLogger().Errorf("unexpected error of type %T: '%v'", err, err.Error())
+	MyBinlogReplicaController.setSqlError(sqlerror.ERUnknownError, err.Error())
 }
 
 // processBinlogEvent processes a single binlog event message and returns an error if there were any problems
 // processing it.
 func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.Engine, event mysql.BinlogEvent) error {
 	var err error
-	createCommit := false
-	commitToAllDatabases := false
 
 	// We don't support checksum validation, so we MUST strip off any checksum bytes if present, otherwise it gets
 	// interpreted as part of the payload and corrupts the data. Future checksum sizes, are not guaranteed to be the
@@ -341,7 +389,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 	// tells us if checksums are enabled and what algorithm they use. We can NOT strip the checksum off of
 	// FormatDescription events, because FormatDescription always includes a CRC32 checksum, and Vitess depends on
 	// those bytes always being present when we parse the event into a FormatDescription type.
-	if a.format != nil && event.IsFormatDescription() == false {
+	if a.format != nil && !event.IsFormatDescription() {
 		var err error
 		event, _, err = event.StripChecksum(*a.format)
 		if err != nil {
@@ -351,19 +399,31 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		}
 	}
 
+	// ------------------- NOTE -----------------------
+	// Since this function is called in a hot loop,
+	// we invoke the logging API conditionally
+	// to avoid unnecessary memory allocation
+	// made by logrus and interface boxing.
+	// ------------------------------------------------
+	logger := ctx.GetLogger()
+	isTraceLevelEnabled := logger.Logger.IsLevelEnabled(logrus.TraceLevel)
+
 	switch {
 	case event.IsRand():
 		// A RAND_EVENT contains two seed values that set the rand_seed1 and rand_seed2 system variables that are
 		// used to compute the random number. For more details, see: https://mariadb.com/kb/en/rand_event/
 		// Note: it is written only before a QUERY_EVENT and is NOT used with row-based logging.
-		ctx.GetLogger().Trace("Received binlog event: Rand")
+		if isTraceLevelEnabled {
+			logger.Trace("Received binlog event: Rand")
+		}
 
 	case event.IsXID():
 		// An XID event is generated for a COMMIT of a transaction that modifies one or more tables of an
 		// XA-capable storage engine. For more details, see: https://mariadb.com/kb/en/xid_event/
-		ctx.GetLogger().Trace("Received binlog event: XID")
-		createCommit = true
-		commitToAllDatabases = true
+		if isTraceLevelEnabled {
+			logger.Trace("Received binlog event: XID")
+		}
+		return a.extendOrCommitBatchTxn(ctx, engine)
 
 	case event.IsQuery():
 		// A Query event represents a statement executed on the source server that should be executed on the
@@ -377,69 +437,85 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 
 		flags, mode := parseQueryEventVars(*a.format, event)
 
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"database": query.Database,
-			"charset":  query.Charset,
-			"query":    query.SQL,
-			"flags":    fmt.Sprintf("0x%x", flags),
-			"sql_mode": fmt.Sprintf("0x%x", mode),
-		}).Infoln("Received binlog event: Query")
+		if isTraceLevelEnabled {
+			logger.WithFields(logrus.Fields{
+				"database": query.Database,
+				"charset":  query.Charset,
+				"query":    query.SQL,
+				"flags":    fmt.Sprintf("0x%x", flags),
+				"sql_mode": fmt.Sprintf("0x%x", mode),
+			}).Trace("Received binlog event: Query")
+		}
 
-		// When executing SQL statements sent from the primary, we can't be sure what database was modified unless we
-		// look closely at the statement. For example, we could be connected to db01, but executed
-		// "create table db02.t (...);" – i.e., looking at query.Database is NOT enough to always determine the correct
-		// database that was modified, so instead, we commit to all databases when we see a Query binlog event to
-		// avoid issues with correctness, at the cost of being slightly less efficient
-		commitToAllDatabases = true
-
+		var msg string
 		if flags&doltvtmysql.QFlagOptionAutoIsNull > 0 {
-			ctx.GetLogger().Tracef("Setting sql_auto_is_null ON")
+			msg = "Setting sql_auto_is_null ON"
 			ctx.SetSessionVariable(ctx, "sql_auto_is_null", 1)
 		} else {
-			ctx.GetLogger().Tracef("Setting sql_auto_is_null OFF")
+			msg = "Setting sql_auto_is_null OFF"
 			ctx.SetSessionVariable(ctx, "sql_auto_is_null", 0)
+		}
+		if isTraceLevelEnabled {
+			logger.Trace(msg)
 		}
 
 		if flags&doltvtmysql.QFlagOptionNotAutocommit > 0 {
-			ctx.GetLogger().Tracef("Setting autocommit=0")
+			msg = "Setting autocommit=0"
 			ctx.SetSessionVariable(ctx, "autocommit", 0)
 		} else {
-			ctx.GetLogger().Tracef("Setting autocommit=1")
+			msg = "Setting autocommit=1"
 			ctx.SetSessionVariable(ctx, "autocommit", 1)
+		}
+		if isTraceLevelEnabled {
+			logger.Trace(msg)
 		}
 
 		if flags&doltvtmysql.QFlagOptionNoForeignKeyChecks > 0 {
-			ctx.GetLogger().Tracef("Setting foreign_key_checks=0")
+			msg = "Setting foreign_key_checks=0"
 			ctx.SetSessionVariable(ctx, "foreign_key_checks", 0)
 		} else {
-			ctx.GetLogger().Tracef("Setting foreign_key_checks=1")
+			msg = "Setting foreign_key_checks=1"
 			ctx.SetSessionVariable(ctx, "foreign_key_checks", 1)
+		}
+		if isTraceLevelEnabled {
+			logger.Trace(msg)
 		}
 
 		// NOTE: unique_checks is not currently honored by Dolt
 		if flags&doltvtmysql.QFlagOptionRelaxedUniqueChecks > 0 {
-			ctx.GetLogger().Tracef("Setting unique_checks=0")
+			msg = "Setting unique_checks=0"
 			ctx.SetSessionVariable(ctx, "unique_checks", 0)
 		} else {
-			ctx.GetLogger().Tracef("Setting unique_checks=1")
+			msg = "Setting unique_checks=1"
 			ctx.SetSessionVariable(ctx, "unique_checks", 1)
 		}
-
-		createCommit = !strings.EqualFold(query.SQL, "begin")
-		// TODO(fan): Here we
-		//   skip the transaction for now;
-		//   skip the operations on `mysql.time_zone*` tables, which are not supported by go-mysql-server yet.
-		if createCommit && !(query.Database == "mysql" && strings.HasPrefix(query.SQL, "TRUNCATE TABLE time_zone")) {
-			ctx.SetCurrentDatabase(query.Database)
-			executeQueryWithEngine(ctx, engine, query.SQL)
+		if isTraceLevelEnabled {
+			logger.Trace(msg)
 		}
+
+		if err := a.executeQueryWithEngine(ctx, engine, query); err != nil {
+			ctx.GetLogger().WithFields(logrus.Fields{
+				"error": err.Error(),
+				"query": query.SQL,
+			}).Error("Applying query failed")
+			msg := fmt.Sprintf("Applying query failed: %v", err.Error())
+			MyBinlogReplicaController.setSqlError(sqlerror.ERUnknownError, msg)
+		}
+		a.inTxnStmtID.Add(1)
 
 	case event.IsRotate():
 		// When a binary log file exceeds the configured size limit, a ROTATE_EVENT is written at the end of the file,
 		// pointing to the next file in the sequence. ROTATE_EVENT is generated locally and written to the binary log
 		// on the source server and it's also written when a FLUSH LOGS statement occurs on the source server.
 		// For more details, see: https://mariadb.com/kb/en/rotate_event/
-		ctx.GetLogger().Trace("Received binlog event: Rotate")
+		if isTraceLevelEnabled {
+			logger.Trace("Received binlog event: Rotate")
+		}
+		// https://dev.mysql.com/doc/refman/8.4/en/binary-log.html
+		// > ... a transaction is written to the file in one piece, never split between files.
+		if a.currentGtid != nil {
+			return a.extendOrCommitBatchTxn(ctx, engine)
+		}
 
 	case event.IsFormatDescription():
 		// This is a descriptor event that is written to the beginning of a binary log file, at position 4 (after
@@ -449,12 +525,15 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			return err
 		}
 		a.format = &format
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"format":        a.format,
-			"formatVersion": a.format.FormatVersion,
-			"serverVersion": a.format.ServerVersion,
-			"checksum":      a.format.ChecksumAlgorithm,
-		}).Trace("Received binlog event: FormatDescription")
+
+		if isTraceLevelEnabled {
+			logger.WithFields(logrus.Fields{
+				"format":        a.format,
+				"formatVersion": a.format.FormatVersion,
+				"serverVersion": a.format.ServerVersion,
+				"checksum":      a.format.ChecksumAlgorithm,
+			}).Trace("Received binlog event: FormatDescription")
+		}
 
 	case event.IsPreviousGTIDs():
 		// Logged in every binlog to record the current replication state. Consists of the last GTID seen for each
@@ -463,9 +542,12 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			return err
 		}
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"previousGtids": position.GTIDSet.String(),
-		}).Trace("Received binlog event: PreviousGTIDs")
+
+		if isTraceLevelEnabled {
+			logger.WithFields(logrus.Fields{
+				"previousGtids": position.GTIDSet.String(),
+			}).Trace("Received binlog event: PreviousGTIDs")
+		}
 
 	case event.IsGTID():
 		// For global transaction ID, used to start a new transaction event group, instead of the old BEGIN query event,
@@ -474,14 +556,24 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			return err
 		}
-		if isBegin {
-			ctx.GetLogger().Errorf("unsupported binlog protocol message: GTID event with 'isBegin' set to true")
+
+		if isTraceLevelEnabled {
+			logger.WithFields(logrus.Fields{
+				"gtid":    gtid,
+				"isBegin": isBegin,
+			}).Trace("Received binlog event: GTID")
 		}
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"gtid":    gtid,
-			"isBegin": isBegin,
-		}).Trace("Received binlog event: GTID")
+
+		// BEGIN will commit the previous transaction implicitly, so we need to set the previous GTID to the current GTID.
+		a.previousGtid = a.currentGtid
 		a.currentGtid = gtid
+
+		if isBegin {
+			if err := a.executeQueryWithEngine(ctx, engine, mysql.Query{SQL: "BEGIN"}); err != nil {
+				return err
+			}
+		}
+
 		// if the source's UUID hasn't been set yet, set it and persist it
 		if a.replicationSourceUuid == "" {
 			uuid := fmt.Sprintf("%v", gtid.SourceServer())
@@ -502,18 +594,21 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			return err
 		}
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"id":        tableId,
-			"tableName": tableMap.Name,
-			"database":  tableMap.Database,
-			"flags":     convertToHexString(tableMap.Flags),
-			"metadata":  tableMap.Metadata,
-			"types":     tableMap.Types,
-		}).Trace("Received binlog event: TableMap")
+
+		if isTraceLevelEnabled {
+			logger.WithFields(logrus.Fields{
+				"id":        tableId,
+				"tableName": tableMap.Name,
+				"database":  tableMap.Database,
+				"flags":     convertToHexString(tableMap.Flags),
+				"metadata":  tableMap.Metadata,
+				"types":     tableMap.Types,
+			}).Trace("Received binlog event: TableMap")
+		}
 
 		if tableId == 0xFFFFFF {
 			// Table ID 0xFFFFFF is a special value that indicates table maps can be freed.
-			ctx.GetLogger().Infof("binlog protocol message: table ID '0xFFFFFF'; clearing table maps")
+			ctx.GetLogger().Trace("binlog protocol message: table ID '0xFFFFFF'; clearing table maps")
 			a.tableMapsById = make(map[uint64]*mysql.TableMap)
 		} else {
 			flags := tableMap.Flags
@@ -526,7 +621,7 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 			}
 			if flags != 0 {
 				msg := fmt.Sprintf("unsupported binlog protocol message: TableMap event with unsupported flags '%x'", flags)
-				ctx.GetLogger().Errorf(msg)
+				ctx.GetLogger().Error(msg)
 				MyBinlogReplicaController.setSqlError(sqlerror.ERUnknownError, msg)
 			}
 			a.tableMapsById[tableId] = tableMap
@@ -539,6 +634,9 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		if err != nil {
 			return err
 		}
+		a.dirtyTxn.Store(true)
+		a.dirtyStream.Store(true)
+		a.inTxnStmtID.Add(1)
 
 	default:
 		// https://mariadb.com/kb/en/2-binlog-event-header/
@@ -557,31 +655,219 @@ func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.
 		}
 	}
 
-	if createCommit {
-		// TODO(fan): Skip the transaction commit for now
-		_ = commitToAllDatabases
-		// var databasesToCommit []string
-		// if commitToAllDatabases {
-		// 	databasesToCommit = getAllUserDatabaseNames(ctx, engine)
-		// 	for _, database := range databasesToCommit {
-		// 		executeQueryWithEngine(ctx, engine, "use `"+database+"`;")
-		// 		executeQueryWithEngine(ctx, engine, "commit;")
-		// 	}
-		// }
+	return nil
+}
 
-		// Record the last GTID processed after the commit
-		a.currentPosition.GTIDSet = a.currentPosition.GTIDSet.AddGTID(a.currentGtid)
-		err := sql.SystemVariables.AssignValues(map[string]interface{}{"gtid_executed": a.currentPosition.GTIDSet.String()})
-		if err != nil {
-			ctx.GetLogger().Errorf("unable to set @@GLOBAL.gtid_executed: %s", err.Error())
+type CommitKind int
+
+const (
+	NormalCommit CommitKind = iota
+	ImplicitCommitBeforeStmt
+	ImplicitCommitAfterStmt
+)
+
+func (a *binlogReplicaApplier) commitOngoingTxn(ctx *sql.Context, engine *gms.Engine, kind CommitKind, reason delta.FlushReason) error {
+	// Flush the delta buffer if it's grown too large
+	// TODO(fan): Make the threshold configurable
+	if err := a.flushDeltaBuffer(ctx, reason); err != nil {
+		return err
+	}
+
+	// Record the last GTID processed.
+	// If the commit is caused implicitly (by, e.g., a BEGIN statment or a DDL statement),
+	// then we don't want to update the saved position to include the current GTID.
+	if kind != ImplicitCommitBeforeStmt {
+		a.pendingPosition = replication.AppendGTID(a.pendingPosition, a.currentGtid)
+	}
+	if err := positionStore.Save(ctx, engine, a.pendingPosition); err != nil {
+		return fmt.Errorf("unable to store GTID executed metadata to disk: %s", err.Error())
+	}
+
+	// --- Commit the transaction --- //
+
+	// Commit the transaction started on this session
+	if kind != ImplicitCommitAfterStmt || !getAutocommit(ctx) {
+		subctx := sql.NewContext(ctx, sql.WithSession(ctx.Session)).WithQuery("COMMIT")
+		if err := a.execute(subctx, engine, "COMMIT"); err != nil {
+			return err
 		}
-		err = positionStore.Save(ctx, engine, a.currentPosition)
-		if err != nil {
-			return fmt.Errorf("unable to store GTID executed metadata to disk: %s", err.Error())
+	}
+	// The session manager does not start an actual transaction in autocommit=1 mode,
+	// but there may be a transaction in progress if we have started it manually.
+	if tx := adapter.TryGetTxn(ctx); tx != nil {
+		if err := tx.Commit(); err != nil && err != stdsql.ErrTxDone {
+			return err
 		}
+		adapter.CloseTxn(ctx)
+	}
+
+	// --- Update the in-memory states --- //
+
+	// Reset the transaction-related flags
+	a.ongoingBatchTxn.Store(false)
+	a.dirtyTxn.Store(false)
+	a.dirtyStream.Store(false)
+	a.inTxnStmtID.Store(0)
+
+	// Record the time of the last commit
+	a.lastCommitTime = time.Now()
+
+	// Synchronize the current position with the pending position
+	a.currentPosition = a.pendingPosition
+
+	// Expose the last GTID executed as a system variable
+	err := sql.SystemVariables.AssignValues(map[string]interface{}{"gtid_executed": a.currentPosition.GTIDSet.String()})
+	if err != nil {
+		ctx.GetLogger().Errorf("unable to set @@GLOBAL.gtid_executed: %s", err.Error())
 	}
 
 	return nil
+}
+
+func (a *binlogReplicaApplier) mayExtendBatchTxn() (bool, delta.FlushReason) {
+	extend, reason := false, delta.UnknownFlushReason
+	if a.ongoingBatchTxn.Load() {
+		extend = true
+		switch {
+		case time.Since(a.lastCommitTime) >= 200*time.Millisecond: // commit the batched txn every 200ms
+			extend, reason = false, delta.TimeTickFlushReason
+		case a.deltaBufSize.Load() >= (128 << 20): // commit the batched txn if the delta buffer is too large (>= 128MB)
+			extend, reason = false, delta.MemoryLimitFlushReason
+		}
+	}
+	return extend, reason
+}
+
+func (a *binlogReplicaApplier) extendOrCommitBatchTxn(ctx *sql.Context, engine *gms.Engine) error {
+	// If we're in a batched transaction, then we don't want to commit yet.
+	extend, reason := a.mayExtendBatchTxn()
+	if extend {
+		a.pendingPosition = replication.AppendGTID(a.pendingPosition, a.currentGtid)
+		a.dirtyStream.Store(false)
+		return nil
+	}
+
+	return a.commitOngoingTxn(ctx, engine, NormalCommit, reason)
+}
+
+// executeQueryWithEngine executes a query against the engine and returns an error if the query failed.
+func (a *binlogReplicaApplier) executeQueryWithEngine(ctx *sql.Context, engine *gms.Engine, query mysql.Query) error {
+	// TODO(fan): Here we skip the operations on `mysql.time_zone*` tables, which are not supported by go-mysql-server yet.
+	if query.Database == "mysql" && strings.HasPrefix(query.SQL, "TRUNCATE TABLE time_zone") {
+		return a.commitOngoingTxn(ctx, engine, ImplicitCommitAfterStmt, delta.DMLStmtFlushReason)
+	}
+
+	// Create a sub-context when running queries against the engine, so that we get an accurate query start time.
+	subctx := sql.NewContext(ctx, sql.WithSession(ctx.Session)).WithQuery(query.SQL)
+	subctx.SetCurrentDatabase(query.Database)
+	if subctx.GetCurrentDatabase() == "" {
+		ctx.GetLogger().WithField("query", query).Warn("No current database selected")
+	}
+
+	// Analyze the query first to check if it's a DDL or DML statement,
+	// and flush the changelog if necessary.
+	var (
+		implicitCommit bool
+		flushChangelog bool
+		flushReason    delta.FlushReason
+	)
+	node, err := engine.PrepareQuery(subctx, query.SQL)
+	if err != nil {
+		return err
+	}
+
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"query":           query.SQL,
+			"db":              subctx.GetCurrentDatabase(),
+			"ongoingBatchTxn": a.ongoingBatchTxn.Load(),
+			"dirtyTxn":        a.dirtyTxn.Load(),
+			"dirtyStream":     a.dirtyStream.Load(),
+		}).Tracef("Executing %T query", node)
+	}
+
+	switch node.(type) {
+	case *plan.StartTransaction:
+		var extendable bool
+		extendable, flushReason = a.mayExtendBatchTxn()
+		if extendable {
+			// If we're in an extended batched transaction,
+			// then we don't want to start a new transaction yet.
+			a.pendingPosition = replication.AppendGTID(a.pendingPosition, a.previousGtid)
+			a.dirtyStream.Store(true)
+			return nil
+		}
+		implicitCommit, flushChangelog = true, true
+
+	case *plan.Commit:
+		return a.extendOrCommitBatchTxn(subctx, engine)
+
+	case *plan.InsertInto, *plan.Update, *plan.DeleteFrom, *plan.LoadData:
+		implicitCommit, flushChangelog, flushReason = false, true, delta.DMLStmtFlushReason
+
+	default:
+		if mysqlutil.CauseImplicitCommitBefore(node) {
+			implicitCommit, flushChangelog, flushReason = true, true, delta.UnknownFlushReason
+		}
+		if mysqlutil.CauseSchemaChange(node) {
+			flushReason = delta.DDLStmtFlushReason
+		}
+	}
+
+	if flushChangelog {
+		// Flush the buffered changes
+		if err := a.flushDeltaBuffer(subctx, flushReason); err != nil {
+			return err
+		}
+	}
+
+	if implicitCommit && a.dirtyTxn.Load() {
+		// Commit the previous transaction before executing the query.
+		if err := a.commitOngoingTxn(subctx, engine, ImplicitCommitBeforeStmt, flushReason); err != nil {
+			return err
+		}
+	}
+
+	if err := a.execute(subctx, engine, query.SQL); err != nil {
+		return err
+	}
+
+	a.dirtyTxn.Store(true)
+	a.dirtyStream.Store(true)
+
+	switch node.(type) {
+	case *plan.StartTransaction:
+		a.ongoingBatchTxn.Store(true)
+	default:
+		a.ongoingBatchTxn.Store(false)
+	}
+
+	if mysqlutil.CauseImplicitCommitAfter(node) {
+		// Commit the transaction after executing the query
+		return a.commitOngoingTxn(subctx, engine, ImplicitCommitAfterStmt, flushReason)
+	}
+
+	return nil
+}
+
+func (a *binlogReplicaApplier) execute(ctx *sql.Context, engine *gms.Engine, query string) error {
+	_, iter, _, err := engine.Query(ctx, query)
+	if err != nil {
+		// Log any errors, except for commits with "nothing to commit"
+		if err.Error() != "nothing to commit" {
+			return err
+		}
+		return nil
+	}
+	for {
+		if _, err := iter.Next(ctx); err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			ctx.GetLogger().Errorf("ERROR reading query results: %v ", err.Error())
+			return err
+		}
+	}
 }
 
 // processRowEvent processes a WriteRows, DeleteRows, or UpdateRows binlog event and returns an error if any problems
@@ -598,7 +884,9 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 	default:
 		return fmt.Errorf("unsupported event type: %v", event)
 	}
-	ctx.GetLogger().Tracef("Received binlog event: %s", eventName)
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.Tracef("Received binlog event: %s", eventName)
+	}
 
 	tableId := event.TableID(*a.format)
 	tableMap, ok := a.tableMapsById[tableId]
@@ -620,9 +908,11 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 		return err
 	}
 
-	ctx.GetLogger().WithFields(logrus.Fields{
-		"flags": fmt.Sprintf("%x", rows.Flags),
-	}).Tracef("Processing rows from %s event", eventName)
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"flags": fmt.Sprintf("%x", rows.Flags),
+		}).Tracef("Processing rows from %s event", eventName)
+	}
 
 	flags := rows.Flags
 	foreignKeyChecksDisabled := false
@@ -663,12 +953,16 @@ func (a *binlogReplicaApplier) processRowEvent(ctx *sql.Context, event mysql.Bin
 		eventType = binlog.InsertRowEvent
 		isRowFormat = rows.DataColumns.BitCount() == fieldCount
 	}
-	ctx.GetLogger().Tracef(" - %s Rows (db: %s, table: %s, row-format: %v)", eventType, tableMap.Database, tableName, isRowFormat)
+
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.Tracef(" - %s Rows (db: %s, table: %s, IsRowFormat: %v, RowCount: %v)", eventType, tableMap.Database, tableName, isRowFormat, len(rows.Rows))
+	}
 
 	if isRowFormat && len(pkSchema.PkOrdinals) > 0 {
 		// --binlog-format=ROW & --binlog-row-image=full
-		return a.appendRowFormatChanges(ctx, engine, tableMap, tableName, schema, eventType, &rows)
+		return a.appendRowFormatChanges(ctx, tableMap, tableName, schema, eventType, &rows)
 	} else {
+		a.ongoingBatchTxn.Store(false)
 		return a.writeChanges(ctx, engine, tableMap, tableName, pkSchema, eventType, &rows, foreignKeyChecksDisabled)
 	}
 }
@@ -706,8 +1000,13 @@ func (a *binlogReplicaApplier) writeChanges(
 		dataRows = append(dataRows, dataRow)
 	}
 
+	txn, err := adapter.GetTxn(ctx, nil)
+	if err != nil {
+		return err
+	}
 	tableWriter, err := a.tableWriterProvider.GetTableWriter(
-		ctx, engine,
+		ctx,
+		txn,
 		tableMap.Database, tableName,
 		pkSchema,
 		len(tableMap.Types), len(rows.Rows),
@@ -718,7 +1017,6 @@ func (a *binlogReplicaApplier) writeChanges(
 	if err != nil {
 		return err
 	}
-	defer tableWriter.Rollback()
 
 	switch event {
 	case binlog.DeleteRowEvent:
@@ -732,38 +1030,42 @@ func (a *binlogReplicaApplier) writeChanges(
 		return err
 	}
 
-	ctx.GetLogger().WithFields(logrus.Fields{
-		"db":    tableMap.Database,
-		"table": tableName,
-		"event": event,
-		"rows":  len(rows.Rows),
-	}).Infoln("processRowEvent")
+	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
+		log.WithFields(logrus.Fields{
+			"db":    tableMap.Database,
+			"table": tableName,
+			"event": event,
+			"rows":  len(rows.Rows),
+		}).Trace("processRowEvent")
+	}
 
-	return tableWriter.Commit()
+	return nil
 }
 
 func (a *binlogReplicaApplier) appendRowFormatChanges(
-	ctx *sql.Context, engine *gms.Engine,
+	ctx *sql.Context,
 	tableMap *mysql.TableMap, tableName string, schema sql.Schema,
 	event binlog.RowEventType, rows *mysql.Rows,
 ) error {
-	appender, err := a.tableWriterProvider.GetDeltaAppender(ctx, engine, tableMap.Database, tableName, schema)
+	appender, err := a.tableWriterProvider.GetDeltaAppender(ctx, tableMap.Database, tableName, schema)
 	if err != nil {
 		return err
 	}
 
 	var (
-		fields        = appender.Fields()
-		actions       = appender.Action()
-		txnTags       = appender.TxnTag()
-		txnServers    = appender.TxnServer()
-		txnGroups     = appender.TxnGroup()
-		txnSeqNumbers = appender.TxnSeqNumber()
+		fields          = appender.Fields()
+		actions         = appender.Action()
+		txnTags         = appender.TxnTag()
+		txnServers      = appender.TxnServer()
+		txnGroups       = appender.TxnGroup()
+		txnSeqNumbers   = appender.TxnSeqNumber()
+		TxnStmtOrdinals = appender.TxnStmtOrdinal()
 
-		txnTag    []byte
-		txnServer []byte
-		txnGroup  []byte
-		txnSeq    uint64
+		txnTag         []byte
+		txnServer      []byte
+		txnGroup       []byte
+		txnSeq         uint64
+		txnStmtOrdinal = a.inTxnStmtID.Load()
 	)
 
 	switch gtid := a.currentGtid.(type) {
@@ -794,6 +1096,7 @@ func (a *binlogReplicaApplier) appendRowFormatChanges(
 			txnServers.Append(txnServer)
 			txnGroups.Append(txnGroup)
 			txnSeqNumbers.Append(txnSeq)
+			TxnStmtOrdinals.Append(txnStmtOrdinal)
 
 			pos := 0
 			for i := range schema {
@@ -810,6 +1113,7 @@ func (a *binlogReplicaApplier) appendRowFormatChanges(
 				}
 				pos += length
 			}
+			a.deltaBufSize.Add(uint64(pos))
 		}
 	}
 
@@ -822,6 +1126,7 @@ func (a *binlogReplicaApplier) appendRowFormatChanges(
 			txnServers.Append(txnServer)
 			txnGroups.Append(txnGroup)
 			txnSeqNumbers.Append(txnSeq)
+			TxnStmtOrdinals.Append(txnStmtOrdinal)
 
 			pos := 0
 			for i := range schema {
@@ -838,12 +1143,26 @@ func (a *binlogReplicaApplier) appendRowFormatChanges(
 				}
 				pos += length
 			}
+			a.deltaBufSize.Add(uint64(pos))
 		}
 	}
 
-	// TODO(fan): Apparently this is not how the delta appender is supposed to be used.
-	//   But let's make it work for now.
-	return a.tableWriterProvider.FlushDelta(ctx)
+	return nil
+}
+
+func (a *binlogReplicaApplier) flushDeltaBuffer(ctx *sql.Context, reason delta.FlushReason) error {
+	tx, err := adapter.GetCatalogTxn(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer a.deltaBufSize.Store(0)
+
+	if err = a.tableWriterProvider.FlushDeltaBuffer(ctx, tx, reason); err != nil {
+		ctx.GetLogger().Errorf("Failed to flush changelog: %v", err.Error())
+		MyBinlogReplicaController.setSqlError(sqlerror.ERUnknownError, err.Error())
+	}
+	return err
 }
 
 //
@@ -1060,40 +1379,6 @@ func loadReplicaServerId() (uint32, error) {
 	return serverId, nil
 }
 
-func executeQueryWithEngine(ctx *sql.Context, engine *gms.Engine, query string) {
-	// Create a sub-context when running queries against the engine, so that we get an accurate query start time.
-	queryCtx := sql.NewContext(ctx, sql.WithSession(ctx.Session)).WithQuery(query)
-
-	if queryCtx.GetCurrentDatabase() == "" {
-		ctx.GetLogger().WithFields(logrus.Fields{
-			"query": query,
-		}).Warn("No current database selected")
-	}
-
-	_, iter, _, err := engine.Query(queryCtx, query)
-	if err != nil {
-		// Log any errors, except for commits with "nothing to commit"
-		if err.Error() != "nothing to commit" {
-			queryCtx.GetLogger().WithFields(logrus.Fields{
-				"error": err.Error(),
-				"query": query,
-			}).Errorf("Applying query failed")
-			msg := fmt.Sprintf("Applying query failed: %v", err.Error())
-			MyBinlogReplicaController.setSqlError(sqlerror.ERUnknownError, msg)
-		}
-		return
-	}
-	for {
-		_, err := iter.Next(queryCtx)
-		if err != nil {
-			if err != io.EOF {
-				queryCtx.GetLogger().Errorf("ERROR reading query results: %v ", err.Error())
-			}
-			return
-		}
-	}
-}
-
 //
 // Generic util functions...
 //
@@ -1103,11 +1388,15 @@ func convertToHexString(v uint16) string {
 	return fmt.Sprintf("%x", v)
 }
 
-// keys returns a slice containing the keys in the specified map |m|.
-func keys[K comparable, V any](m map[K]V) []K {
-	keys := make([]K, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+func getAutocommit(ctx *sql.Context) bool {
+	autocommit := true
+	autoCommitSessionVar, err := ctx.GetSessionVariable(ctx, sql.AutoCommitSessionVar)
+	if err == nil {
+		autocommit, err = sql.ConvertToBool(ctx, autoCommitSessionVar)
 	}
-	return keys
+	if err != nil {
+		ctx.GetLogger().Warn("Unable to get @@autocommit session variable; assuming autocommit is enabled:", err)
+		return true
+	}
+	return autocommit
 }

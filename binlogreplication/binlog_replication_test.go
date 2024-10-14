@@ -854,9 +854,9 @@ func startDuckSqlServer(dir string, persistentSystemVars map[string]string) (int
 	}
 
 	args := []string{"go", "run", ".",
-		// "--loglevel=TRACE",
 		fmt.Sprintf("--port=%v", duckPort),
 		fmt.Sprintf("--datadir=%s", dir),
+		"--loglevel=6", // TRACE
 	}
 
 	// If we're running in CI, use a precompiled dolt binary instead of go run
