@@ -42,6 +42,7 @@ var _ sql.IndexAddressableTable = (*Table)(nil)
 var _ sql.InsertableTable = (*Table)(nil)
 var _ sql.UpdatableTable = (*Table)(nil)
 var _ sql.DeletableTable = (*Table)(nil)
+var _ sql.ReplaceableTable = (*Table)(nil)
 var _ sql.CommentedTable = (*Table)(nil)
 
 func NewTable(name string, db *Database) *Table {
@@ -313,6 +314,17 @@ func (t *Table) Inserter(*sql.Context) sql.RowInserter {
 // Deleter implements sql.DeletableTable.
 func (t *Table) Deleter(*sql.Context) sql.RowDeleter {
 	return nil
+}
+
+// Replacer implements sql.ReplaceableTable.
+func (t *Table) Replacer(*sql.Context) sql.RowReplacer {
+	hasKey := len(t.schema.PkOrdinals) > 0 || !sql.IsKeyless(t.schema.Schema)
+	return &rowInserter{
+		db:      t.db.Name(),
+		table:   t.name,
+		schema:  t.schema.Schema,
+		replace: hasKey,
+	}
 }
 
 // CreateIndex implements sql.IndexAlterableTable.

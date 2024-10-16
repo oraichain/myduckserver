@@ -233,8 +233,10 @@ func IsPureDataQuery(n sql.Node) bool {
 	hasDataTable := false
 	for _, tn := range c.tables {
 		switch tn.Database().Name() {
-		case "mysql", "information_schema", "performance_schema", "sys":
+		case "mysql", "information_schema", "sys":
 			return false
+		case "performance_schema":
+			// performance_schema is materialized in DuckDB, so it's fine to query it.
 		}
 		switch tn.UnderlyingTable().(type) {
 		case *catalog.Table, *catalog.IndexedTable:

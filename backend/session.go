@@ -130,6 +130,7 @@ func (sess Session) PersistGlobal(sysVarName string, value interface{}) error {
 	if _, _, ok := sql.SystemVariables.GetGlobal(sysVarName); !ok {
 		return sql.ErrUnknownSystemVariable.New(sysVarName)
 	}
+	sess.GetLogger().Tracef("Persisting global variable %s = %v", sysVarName, value)
 	_, err := sess.ExecContext(
 		context.Background(),
 		catalog.InternalTables.PersistentVariable.UpsertStmt(),
@@ -162,6 +163,7 @@ func (sess Session) GetPersistedValue(k string) (interface{}, error) {
 		catalog.InternalTables.PersistentVariable.SelectStmt(),
 		k,
 	).Scan(&value, &vtype)
+	sess.GetLogger().Tracef("Getting persisted global variable %s = %s [%s]", k, value, vtype)
 	switch {
 	case err == stdsql.ErrNoRows:
 		return nil, nil

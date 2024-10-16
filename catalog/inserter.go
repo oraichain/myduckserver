@@ -12,18 +12,28 @@ import (
 )
 
 type rowInserter struct {
-	db     string
-	table  string
-	schema sql.Schema
+	db      string
+	table   string
+	schema  sql.Schema
+	replace bool
 
 	once     sync.Once
 	conn     *stdsql.Conn
 	tmpTable string
 	stmt     *stdsql.Stmt
 	err      error
+	flushSQL string
 }
 
 var _ sql.RowInserter = &rowInserter{}
+var _ sql.RowReplacer = &rowInserter{}
+
+// Delete implements sql.RowReplacer.
+// Since REPLACE is handled in the same way as INSERT,
+// we don't need to implement it and it should never be called.
+func (ri *rowInserter) Delete(ctx *sql.Context, row sql.Row) error {
+	return errors.New("unexpected call to Delete")
+}
 
 func (ri *rowInserter) init(ctx *sql.Context) {
 	ri.tmpTable = fmt.Sprintf("%s_%s_%d", ri.db, ri.table, ctx.ID())
@@ -43,7 +53,8 @@ func (ri *rowInserter) init(ctx *sql.Context) {
 
 	// TODO(fan): Appender is faster, but it requires strict type alignment.
 	var insert strings.Builder
-	insert.WriteString("INSERT INTO ")
+	insert.Grow(64)
+	insert.WriteString("INSERT INTO ") // the temp table is keyless, so REPLACE is not needed
 	insert.WriteString(QuoteIdentifierANSI(ri.tmpTable))
 	insert.WriteString(" VALUES (")
 	insert.WriteByte('?')
@@ -52,6 +63,20 @@ func (ri *rowInserter) init(ctx *sql.Context) {
 	}
 	insert.WriteByte(')')
 	ri.stmt, ri.err = ri.conn.PrepareContext(ctx, insert.String())
+	if ri.err != nil {
+		return
+	}
+
+	insert.Reset()
+	insert.WriteString("INSERT ")
+	if ri.replace {
+		insert.WriteString(" OR REPLACE")
+	}
+	insert.WriteString(" INTO ")
+	insert.WriteString(ConnectIdentifiersANSI(ri.db, ri.table))
+	insert.WriteString(" SELECT * FROM ")
+	insert.WriteString(QuoteIdentifierANSI(ri.tmpTable))
+	ri.flushSQL = insert.String()
 }
 
 func (ri *rowInserter) StatementBegin(ctx *sql.Context) {
@@ -71,8 +96,7 @@ func (ri *rowInserter) StatementComplete(ctx *sql.Context) error {
 func (ri *rowInserter) Close(ctx *sql.Context) error {
 	defer ri.clear(ctx)
 	if ri.err == nil {
-		sql := fmt.Sprintf("INSERT INTO %s SELECT * FROM temp.main.%s", ConnectIdentifiersANSI(ri.db, ri.table), QuoteIdentifierANSI(ri.tmpTable))
-		_, ri.err = ri.conn.ExecContext(ctx, sql)
+		_, ri.err = ri.conn.ExecContext(ctx, ri.flushSQL)
 	}
 	return ri.err
 }

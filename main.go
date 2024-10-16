@@ -15,16 +15,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
-	"path/filepath"
 
 	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/catalog"
+	"github.com/apecloud/myduckserver/myfunc"
+	"github.com/apecloud/myduckserver/plugin"
 	"github.com/apecloud/myduckserver/replica"
 	"github.com/apecloud/myduckserver/transpiler"
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/server"
+	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/sirupsen/logrus"
 
 	_ "github.com/marcboeker/go-duckdb"
@@ -42,8 +45,9 @@ var (
 	port          = 3306
 	dataDirectory = "."
 	dbFileName    = "mysql.db"
-	dbFilePath    string
 	logLevel      = int(logrus.InfoLevel)
+
+	replicaOptions replica.ReplicaOptions
 )
 
 func init() {
@@ -51,6 +55,17 @@ func init() {
 	flag.IntVar(&port, "port", port, "The port to bind to.")
 	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
 	flag.IntVar(&logLevel, "loglevel", logLevel, "The log level to use.")
+
+	// The following options need to be set for MySQL Shell's utilities to work properly.
+
+	// https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html#sysvar_report_host
+	flag.StringVar(&replicaOptions.ReportHost, "report-host", replicaOptions.ReportHost, "The host name or IP address of the replica to be reported to the source during replica registration.")
+	// https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html#sysvar_report_port
+	flag.IntVar(&replicaOptions.ReportPort, "report-port", replicaOptions.ReportPort, "The TCP/IP port number for connecting to the replica, to be reported to the source during replica registration.")
+	// https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html#sysvar_report_user
+	flag.StringVar(&replicaOptions.ReportUser, "report-user", replicaOptions.ReportUser, "The account user name of the replica to be reported to the source during replica registration.")
+	// https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html#sysvar_report_password
+	flag.StringVar(&replicaOptions.ReportPassword, "report-password", replicaOptions.ReportPassword, "The account password of the replica to be reported to the source during replica registration.")
 }
 
 func ensureSQLTranslate() {
@@ -63,9 +78,11 @@ func ensureSQLTranslate() {
 func main() {
 	flag.Parse()
 
-	logrus.SetLevel(logrus.Level(logLevel))
+	if replicaOptions.ReportPort == 0 {
+		replicaOptions.ReportPort = port
+	}
 
-	dbFilePath = filepath.Join(dataDirectory, dbFileName)
+	logrus.SetLevel(logrus.Level(logLevel))
 
 	ensureSQLTranslate()
 
@@ -81,11 +98,14 @@ func main() {
 
 	builder := backend.NewDuckBuilder(engine.Analyzer.ExecBuilder, pool)
 	engine.Analyzer.ExecBuilder = builder
+	engine.Analyzer.Catalog.RegisterFunction(sql.NewContext(context.Background()), myfunc.ExtraBuiltIns...)
+	engine.Analyzer.Catalog.MySQLDb.SetPlugins(plugin.AuthPlugins)
 
 	if err := setPersister(provider, engine); err != nil {
 		logrus.Fatalln("Failed to set the persister:", err)
 	}
 
+	replica.RegisterReplicaOptions(&replicaOptions)
 	replica.RegisterReplicaController(provider, engine, pool, builder)
 
 	config := server.Config{

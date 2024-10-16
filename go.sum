@@ -28,6 +28,8 @@ github.com/apecloud/dolt-vitess v0.0.0-20240919225659-2ad81685e772 h1:OgHbYQJXAE
 github.com/apecloud/dolt-vitess v0.0.0-20240919225659-2ad81685e772/go.mod h1:uBvlRluuL+SbEWTCZ68o0xvsdYZER3CEG/35INdzfJM=
 github.com/apecloud/dolt-vitess v0.0.0-20240927100428-4ba1490cf5da h1:+sOwYwbN/kZZd0Ggsz+ozKa6gdAUYz/bgVMJkoDmuMc=
 github.com/apecloud/dolt-vitess v0.0.0-20240927100428-4ba1490cf5da/go.mod h1:uBvlRluuL+SbEWTCZ68o0xvsdYZER3CEG/35INdzfJM=
+github.com/apecloud/dolt-vitess v0.0.0-20241016030916-464ec1ba8a1a h1:ARRxRvo7HUKFvqKhXh+nRVEV5K+AuyVP6QlntDzQPww=
+github.com/apecloud/dolt-vitess v0.0.0-20241016030916-464ec1ba8a1a/go.mod h1:uBvlRluuL+SbEWTCZ68o0xvsdYZER3CEG/35INdzfJM=
 github.com/armon/circbuf v0.0.0-20150827004946-bbbad097214e/go.mod h1:3U/XgcO3hCbHZ8TKRvWD2dDTCfh9M9ya+I9JpbB7O8o=
 github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmVTwzkszR9V5SSuryQ31EELlFMUz1kKyl939pY=
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
@@ -75,12 +77,16 @@ github.com/dolthub/go-mysql-server v0.18.2-0.20240923181307-5aacdb13e45a h1:rpCm
 github.com/dolthub/go-mysql-server v0.18.2-0.20240923181307-5aacdb13e45a/go.mod h1:lGbU2bK+QNnlETdUjOOaE+UnlEUu31VaQOFKAFGyZN4=
 github.com/dolthub/go-mysql-server v0.18.2-0.20240926171723-77ed13c03196 h1:H4bKFiOdjmhBrdjrNvYAuhfplpHM3aVFcbLXlGoD/Fc=
 github.com/dolthub/go-mysql-server v0.18.2-0.20240926171723-77ed13c03196/go.mod h1:lGbU2bK+QNnlETdUjOOaE+UnlEUu31VaQOFKAFGyZN4=
+github.com/dolthub/go-mysql-server v0.18.2-0.20241015190154-54bd6d6e1ce8 h1:opC/9GtHMpPf5v0eRdngp166LcJTTyQ+YZfyjAchHaY=
+github.com/dolthub/go-mysql-server v0.18.2-0.20241015190154-54bd6d6e1ce8/go.mod h1:Z8tket+3sYcU3d4yW90Ggld2d+C2DUgnpB8cBP0+GvI=
 github.com/dolthub/jsonpath v0.0.2-0.20240227200619-19675ab05c71 h1:bMGS25NWAGTEtT5tOBsCuCrlYnLRKpbJVJkDbrTRhwQ=
 github.com/dolthub/jsonpath v0.0.2-0.20240227200619-19675ab05c71/go.mod h1:2/2zjLQ/JOOSbbSboojeg+cAwcRV0fDLzIiWch/lhqI=
 github.com/dolthub/sqllogictest/go v0.0.0-20240618184124-ca47f9354216 h1:JWkKRE4EHUcEVQCMRBej8DYxjYjRz/9MdF/NNQh0o70=
 github.com/dolthub/sqllogictest/go v0.0.0-20240618184124-ca47f9354216/go.mod h1:e/FIZVvT2IR53HBCAo41NjqgtEnjMJGKca3Y/dAmZaA=
 github.com/dolthub/vitess v0.0.0-20240919225659-2ad81685e772 h1:vDwBX7Lc8DnA8Zk0iRIu6slCw0GIUfYfFlYDYJQw8GQ=
 github.com/dolthub/vitess v0.0.0-20240919225659-2ad81685e772/go.mod h1:uBvlRluuL+SbEWTCZ68o0xvsdYZER3CEG/35INdzfJM=
+github.com/dolthub/vitess v0.0.0-20241010201417-9d4f54b29ccc h1:ZZgTRuxEwd3X67njtK30buHeZScLAd4W0rbRV8CORhE=
+github.com/dolthub/vitess v0.0.0-20241010201417-9d4f54b29ccc/go.mod h1:uBvlRluuL+SbEWTCZ68o0xvsdYZER3CEG/35INdzfJM=
 github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/eapache/go-resiliency v1.1.0/go.mod h1:kFI+JgMyC7bLPUVY133qvEBtVayf5mFgVsvEsIPBvNs=
 github.com/eapache/go-xerial-snappy v0.0.0-20180814174437-776d5712da21/go.mod h1:+020luEh2TKB4/GOp8oxxtq0Daoen/Cii55CzbTV6DU=
@@ -91,6 +97,10 @@ github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/fanyang01/go-mysql-server v0.0.0-20240927093603-e7d5b2c91bf7 h1:QSqlxTk6pjF/11KV2JsBNGLmIlMccdzpUkJmNp1lsTs=
 github.com/fanyang01/go-mysql-server v0.0.0-20240927093603-e7d5b2c91bf7/go.mod h1:GYFkohqx2Nr8NNjcEwPV1XsALRl3/l0eKhMTVqUiPmM=
+github.com/fanyang01/go-mysql-server v0.0.0-20241016030019-a1d92d867df4 h1:l+EazqTiTuD54N0lXpadkv7LoSxSNJQw/pLK82OKmIU=
+github.com/fanyang01/go-mysql-server v0.0.0-20241016030019-a1d92d867df4/go.mod h1:muA0iXUB7NjOojVRfJBKE2dL4OAABq3ZSbISlTGvmQY=
+github.com/fanyang01/go-mysql-server v0.0.0-20241016052333-7fc0e18f41bb h1:FjAhczeEu2P/F2+YbKjR/Q4lgnD/0nCWPmaKHul797o=
+github.com/fanyang01/go-mysql-server v0.0.0-20241016052333-7fc0e18f41bb/go.mod h1:muA0iXUB7NjOojVRfJBKE2dL4OAABq3ZSbISlTGvmQY=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/franela/goblin v0.0.0-20200105215937-c9ffbefa60db/go.mod h1:7dvUGVsVBjqR7JHJk0brhHOZYGmfBYOrK0ZhYMEtBr4=
 github.com/franela/goreq v0.0.0-20171204163338-bcd34c9993f8/go.mod h1:ZhphrRTfi2rbfLwlschooIH4+wKKDR4Pdxhh+TRoA20=
