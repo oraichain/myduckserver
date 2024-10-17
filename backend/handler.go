@@ -17,7 +17,6 @@ package backend
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/vitess/go/mysql"
@@ -49,8 +48,6 @@ func (h *MyHandler) ComQuery(
 	query string,
 	callback mysql.ResultSpoolFn,
 ) error {
-	// https://github.com/dolthub/dolt/issues/8455
-	query = strings.ReplaceAll(query, "CHARACTER SET 'utf8mb4'", "CHARACTER SET utf8mb4")
 	return h.Handler.ComQuery(ctx, c, query, callback)
 }
 

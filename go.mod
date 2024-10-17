@@ -6,8 +6,8 @@ require (
 	github.com/Shopify/toxiproxy/v2 v2.9.0
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/apd/v3 v3.2.1
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241015190154-54bd6d6e1ce8
-	github.com/dolthub/vitess v0.0.0-20241010201417-9d4f54b29ccc
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241016193930-58d51b356103
+	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697
@@ -22,8 +22,8 @@ require (
 )
 
 replace (
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241015190154-54bd6d6e1ce8 => github.com/fanyang01/go-mysql-server v0.0.0-20241016052333-7fc0e18f41bb
-	github.com/dolthub/vitess v0.0.0-20241010201417-9d4f54b29ccc => github.com/apecloud/dolt-vitess v0.0.0-20241016030916-464ec1ba8a1a
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241016193930-58d51b356103 => github.com/fanyang01/go-mysql-server v0.0.0-20241017031253-bef4d25c51a3
+	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e => github.com/apecloud/dolt-vitess v0.0.0-20241017031156-06988c627a21
 )
 
 require (
