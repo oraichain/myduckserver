@@ -55,7 +55,7 @@ echo "Starting snapshot copy with mysqlsh..."
 output=$(mysqlsh -h${MYSQL_HOST} -P${MYSQL_PORT} -u${MYSQL_USER} -p${MYSQL_PASSWORD} -- util copy-instance 'mysql://admin:admin@127.0.0.1:3306' --exclude-users root --ignore-existing-objects true --handle-grant-errors ignore --threads $THREAD_COUNT --bytesPerChunk 256M)
 
 # Extract the EXECUTED_GTID_SET using grep and awk
-EXECUTED_GTID_SET=$(echo "$output" | grep "EXECUTED_GTID_SET" | awk '{print $2}')
+EXECUTED_GTID_SET=$(echo "$output" | grep -i "EXECUTED_GTID_SET" | awk '{print $2}')
 
 # Check if EXECUTED_GTID_SET is empty
 if [ -z "$EXECUTED_GTID_SET" ]; then
