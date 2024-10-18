@@ -32,15 +32,18 @@ type DuckBuilder struct {
 	base sql.NodeExecBuilder
 	pool *ConnectionPool
 
+	provider *catalog.DatabaseProvider
+
 	FlushDeltaBuffer func() error
 }
 
 var _ sql.NodeExecBuilder = (*DuckBuilder)(nil)
 
-func NewDuckBuilder(base sql.NodeExecBuilder, pool *ConnectionPool) *DuckBuilder {
+func NewDuckBuilder(base sql.NodeExecBuilder, pool *ConnectionPool, provider *catalog.DatabaseProvider) *DuckBuilder {
 	return &DuckBuilder{
-		base: base,
-		pool: pool,
+		base:     base,
+		pool:     pool,
+		provider: provider,
 	}
 }
 
@@ -80,15 +83,18 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 		*plan.ShowBinlogs, *plan.ShowBinlogStatus, *plan.ShowWarnings,
 		*plan.StartTransaction, *plan.Commit, *plan.Rollback,
 		*plan.Set, *plan.ShowVariables,
-		*plan.AlterDefaultSet, *plan.AlterDefaultDrop,
-		*plan.LoadData:
+		*plan.AlterDefaultSet, *plan.AlterDefaultDrop:
 		return b.base.Build(ctx, root, r)
 	case *plan.InsertInto:
-		src := n.(*plan.InsertInto).Source
+		insert := n.(*plan.InsertInto)
+		src := insert.Source
 		if proj, ok := src.(*plan.Project); ok {
 			src = proj.Child
 		}
-		if _, ok := src.(*plan.LoadData); ok {
+		if load, ok := src.(*plan.LoadData); ok {
+			if dst, err := plan.GetInsertable(insert.Destination); err == nil && isRewritableLoadData(load) {
+				return b.buildLoadData(ctx, root, insert, dst, load)
+			}
 			return b.base.Build(ctx, root, r)
 		}
 	}

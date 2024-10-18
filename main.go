@@ -96,7 +96,7 @@ func main() {
 
 	engine := sqle.NewDefault(provider)
 
-	builder := backend.NewDuckBuilder(engine.Analyzer.ExecBuilder, pool)
+	builder := backend.NewDuckBuilder(engine.Analyzer.ExecBuilder, pool, provider)
 	engine.Analyzer.ExecBuilder = builder
 	engine.Analyzer.Catalog.RegisterFunction(sql.NewContext(context.Background()), myfunc.ExtraBuiltIns...)
 	engine.Analyzer.Catalog.MySQLDb.SetPlugins(plugin.AuthPlugins)

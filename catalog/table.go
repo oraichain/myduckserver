@@ -171,7 +171,7 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	typ, err := duckdbDataType(column.Type)
+	typ, err := DuckdbDataType(column.Type)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	typ, err := duckdbDataType(column.Type)
+	typ, err := DuckdbDataType(column.Type)
 	if err != nil {
 		return err
 	}
