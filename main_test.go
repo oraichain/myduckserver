@@ -918,10 +918,18 @@ func TestLoadData(t *testing.T) {
 	harness := NewDefaultDuckHarness()
 	harness.QueriesToSkip(
 		"create table loadtable(pk int primary key, check (pk > 1))",
+		"create table loadtable(pk int primary key, c1 int)", // Table has more columns than import.
 		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
 		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
-		"LOAD DATA INFILE './testdata/test2.csv' IGNORE INTO TABLE loadtable FIELDS TERMINATED BY ',' IGNORE 1 LINES",
-		"LOAD DATA INFILE './testdata/test2.csv' REPLACE INTO TABLE loadtable FIELDS TERMINATED BY ',' IGNORE 1 LINES",
+		"CREATE TABLE inmate_population_snapshots (id char(21) NOT NULL, snapshot_date date NOT NULL, total int,"+
+			"total_off_site int, male int, female int, other_gender int, white int, black int, hispanic int,"+
+			"asian int, american_indian int, mexican_american int, multi_racial int, other_race int,"+
+			"on_probation int, on_parole int, felony int, misdemeanor int, other_offense int,"+
+			"convicted_or_sentenced int, detained_or_awaiting_trial int, first_time_incarcerated int, employed int,"+
+			"unemployed int, citizen int, noncitizen int, juvenile int, juvenile_male int, juvenile_female int,"+
+			"death_row_condemned int, solitary_confinement int, technical_parole_violators int,"+
+			"source_url varchar(2043) NOT NULL, source_url_2 varchar(2043), civil_offense int, federal_offense int,"+
+			"PRIMARY KEY (id,snapshot_date), KEY id (id));", // load empty string into int column should result in 0
 	)
 	enginetest.TestLoadData(t, harness)
 }

@@ -113,7 +113,7 @@ func (d *Database) CreateTable(ctx *sql.Context, name string, schema sql.Primary
 	var columns []string
 	var columnCommentSQLs []string
 	for _, col := range schema.Schema {
-		typ, err := duckdbDataType(col.Type)
+		typ, err := DuckdbDataType(col.Type)
 		if err != nil {
 			return err
 		}

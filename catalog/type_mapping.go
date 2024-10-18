@@ -20,6 +20,14 @@ type AnnotatedDuckType struct {
 	mysql MySQLType
 }
 
+func (t AnnotatedDuckType) Name() string {
+	return t.name
+}
+
+func (t AnnotatedDuckType) MySQL() MySQLType {
+	return t.mysql
+}
+
 type MySQLType struct {
 	Name      string
 	Length    uint32   `json:",omitempty"`
@@ -103,7 +111,7 @@ func newSetType(typ sql.SetType) AnnotatedDuckType {
 
 const DuckDBDecimalTypeMaxPrecision = 38
 
-func duckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
+func DuckdbDataType(mysqlType sql.Type) (AnnotatedDuckType, error) {
 	switch mysqlType.Type() {
 	case sqltypes.Int8:
 		return newNumberType("TINYINT", mysqlType.(sql.NumberType).DisplayWidth()), nil
