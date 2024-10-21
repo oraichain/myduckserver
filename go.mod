@@ -6,7 +6,7 @@ require (
 	github.com/Shopify/toxiproxy/v2 v2.9.0
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/apd/v3 v3.2.1
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241016193930-58d51b356103
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772
 	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jmoiron/sqlx v1.4.0
@@ -22,7 +22,7 @@ require (
 )
 
 replace (
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241016193930-58d51b356103 => github.com/fanyang01/go-mysql-server v0.0.0-20241017031253-bef4d25c51a3
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772 => github.com/fanyang01/go-mysql-server v0.0.0-20241021025444-83e2e88c99aa
 	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e => github.com/apecloud/dolt-vitess v0.0.0-20241017031156-06988c627a21
 )
 
