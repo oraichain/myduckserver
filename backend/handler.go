@@ -17,15 +17,18 @@ package backend
 import (
 	"context"
 	"fmt"
-
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/vitess/go/mysql"
+	"regexp"
 )
 
 type MyHandler struct {
 	*server.Handler
 	pool *ConnectionPool
 }
+
+// Precompile regex for performance
+var autoIncrementRegex = regexp.MustCompile(`AUTO_INCREMENT=\d+`)
 
 func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
 	h.pool.CloseConn(c.ConnectionID)
@@ -48,6 +51,8 @@ func (h *MyHandler) ComQuery(
 	query string,
 	callback mysql.ResultSpoolFn,
 ) error {
+	query = autoIncrementRegex.ReplaceAllString(query, "")
+
 	return h.Handler.ComQuery(ctx, c, query, callback)
 }
 
