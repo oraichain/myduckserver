@@ -55,7 +55,19 @@ else
     echo "mysqlsh is already installed."
 fi
 
-# Step 2: Call start_snapshot.sh with MySQL parameters
+# Step 2: Check if Replica of MyDuckServer has already been started
+REPLICA_STATUS=$(mysql -h127.0.0.1 -uroot -P3306 -e "SHOW REPLICA STATUS\G")
+SOURCE_HOST=$(echo "$REPLICA_STATUS" | awk '/Source_Host/ {print $2}')
+
+# Check if Source_Host is not null or empty
+if [[ -n "$SOURCE_HOST" ]]; then
+  echo "Replica has already been started. Source Host: $SOURCE_HOST"
+  exit 1
+else
+  echo "No replica has been started. Proceeding with setup."
+fi
+
+# Step 3: Call start_snapshot.sh with MySQL parameters
 echo "Starting snapshot..."
 source start_snapshot.sh
 if [[ $? -ne 0 ]]; then
@@ -63,7 +75,7 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-# Step 3: Call start_delta.sh with MySQL parameters
+# Step 4: Call start_delta.sh with MySQL parameters
 echo "Starting delta..."
 source start_delta.sh
 if [[ $? -ne 0 ]]; then
