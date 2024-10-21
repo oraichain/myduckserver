@@ -6,9 +6,27 @@ ARCH=$(uname -m)
 # Detect OS platform (Linux or Darwin for macOS)
 OS=$(uname -s)
 
-# Function to install MySQL Shell on Linux
+# Function to install MySQL Shell on Debian-like Linux systems using apt
+install_mysql_shell_debian() {
+    echo "Installing MySQL Shell on Debian-like system..."
+
+    # Add MySQL APT repository
+    sudo apt-get update
+    sudo apt-get install -y lsb-release wget
+    wget https://dev.mysql.com/get/mysql-apt-config_0.8.22-1_all.deb
+    sudo dpkg -i mysql-apt-config_0.8.22-1_all.deb
+
+    # Install MySQL Shell
+    sudo apt-get update
+    sudo apt-get install -y mysql-shell
+
+    # Clean up the package file
+    rm -f mysql-apt-config_0.8.22-1_all.deb
+}
+
+# Function to install MySQL Shell on Linux using RPM
 install_mysql_shell_linux() {
-    echo "Installing MySQL Shell on Linux..."
+    echo "Installing MySQL Shell on Linux (RPM-based)..."
 
     # Set the base URL for MySQL Shell downloads
     BASE_URL="https://dev.mysql.com/get/Downloads/MySQL-Shell"
@@ -64,7 +82,13 @@ install_mysql_shell_macos() {
 main() {
     # Determine the platform and install MySQL Shell accordingly
     if [[ "$OS" == "Linux" ]]; then
-        install_mysql_shell_linux
+        if command -v apt-get &> /dev/null; then
+            # Debian-like Linux system (e.g., Ubuntu, Debian)
+            install_mysql_shell_debian
+        else
+            # Other Linux system (e.g., RPM-based systems)
+            install_mysql_shell_linux
+        fi
     elif [[ "$OS" == "Darwin" ]]; then
         install_mysql_shell_macos
     else
