@@ -152,6 +152,7 @@ func (db *DuckBuilder) executeLoadData(ctx *sql.Context, insert *plan.InsertInto
 
 	b.WriteString(", auto_detect = false")
 	b.WriteString(", header = false")
+	b.WriteString(", null_padding = true")
 
 	b.WriteString(", new_line = ")
 	if len(load.LinesTerminatedBy) == 1 {

@@ -918,7 +918,6 @@ func TestLoadData(t *testing.T) {
 	harness := NewDefaultDuckHarness()
 	harness.QueriesToSkip(
 		"create table loadtable(pk int primary key, check (pk > 1))",
-		"create table loadtable(pk int primary key, c1 int)", // Table has more columns than import.
 		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
 		"CREATE TABLE test1 (pk BIGINT PRIMARY KEY, v1 BIGINT DEFAULT (v2 * 10), v2 BIGINT DEFAULT 5);",
 		"CREATE TABLE inmate_population_snapshots (id char(21) NOT NULL, snapshot_date date NOT NULL, total int,"+
