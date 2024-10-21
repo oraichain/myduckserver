@@ -8,3 +8,4 @@ myduckserver
 *.out
 *.test
 .vscode/
+pipes/

@@ -303,7 +303,7 @@ func NewEngine(t *testing.T, harness enginetest.Harness, dbProvider sql.Database
 	e := enginetest.NewEngineWithProvider(t, harness, dbProvider)
 	e.Analyzer.Catalog.StatsProvider = statsProvider
 
-	builder := backend.NewDuckBuilder(e.Analyzer.ExecBuilder, pool)
+	builder := backend.NewDuckBuilder(e.Analyzer.ExecBuilder, pool, provider)
 	e.Analyzer.ExecBuilder = builder
 
 	ctx := enginetest.NewContext(harness)
