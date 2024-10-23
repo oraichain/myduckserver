@@ -43,6 +43,7 @@ import (
 var (
 	address       = "0.0.0.0"
 	port          = 3306
+	socket        string
 	dataDirectory = "."
 	dbFileName    = "mysql.db"
 	logLevel      = int(logrus.InfoLevel)
@@ -53,6 +54,7 @@ var (
 func init() {
 	flag.StringVar(&address, "address", address, "The address to bind to.")
 	flag.IntVar(&port, "port", port, "The port to bind to.")
+	flag.StringVar(&socket, "socket", socket, "The Unix domain socket to bind to.")
 	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
 	flag.IntVar(&logLevel, "loglevel", logLevel, "The log level to use.")
 
@@ -111,6 +113,7 @@ func main() {
 	config := server.Config{
 		Protocol: "tcp",
 		Address:  fmt.Sprintf("%s:%d", address, port),
+		Socket:   socket,
 	}
 	s, err := server.NewServerWithHandler(config, engine, backend.NewSessionBuilder(provider, pool), nil, backend.WrapHandler(pool))
 	if err != nil {

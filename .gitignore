@@ -9,3 +9,4 @@ myduckserver
 *.test
 .vscode/
 pipes/
+*.sock
