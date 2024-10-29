@@ -7,7 +7,7 @@ if [ -z "$EXECUTED_GTID_SET" ]; then
 fi
 
 # Connect to MySQL and execute the replication configuration commands
-mysql -h127.0.0.1 -uroot -P3306 <<EOF
+mysqlsh --sql --host=127.0.0.1 --user=root --port=3306 --password='' <<EOF
 SET global gtid_purged = "${EXECUTED_GTID_SET}";
 CHANGE REPLICATION SOURCE TO SOURCE_HOST='${MYSQL_HOST}',
   SOURCE_PORT=${MYSQL_PORT},

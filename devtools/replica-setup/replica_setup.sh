@@ -56,7 +56,7 @@ else
 fi
 
 # Step 2: Check if Replica of MyDuckServer has already been started
-REPLICA_STATUS=$(mysql -h127.0.0.1 -uroot -P3306 -e "SHOW REPLICA STATUS\G")
+REPLICA_STATUS=$(mysqlsh --sql --host=127.0.0.1 --user=root --port=3306 --password='' -e "SHOW REPLICA STATUS\G")
 SOURCE_HOST=$(echo "$REPLICA_STATUS" | awk '/Source_Host/ {print $2}')
 
 # Check if Source_Host is not null or empty

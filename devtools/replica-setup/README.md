@@ -11,12 +11,12 @@ Before you begin, ensure that:
 
 ## Getting Started
 
-To create a MySQL replica in MyDuckServer, run the provided `create_replica.sh` script. You will need to supply the MySQL instance connection details as parameters.
+To create a MySQL replica in MyDuckServer, run the provided `replica_setup.sh` script. You will need to supply the MySQL instance connection details as parameters.
 
 ### Usage
 
 ```bash
-bash create_replica.sh --mysql_host <mysql_host> --mysql_port <mysql_port> --mysql_user <mysql_user> --mysql_password <mysql_password>
+bash replica_setup.sh --mysql_host <mysql_host> --mysql_port <mysql_port> --mysql_user <mysql_user> --mysql_password <mysql_password>
 ```
 
 ### Parameters
@@ -29,7 +29,7 @@ bash create_replica.sh --mysql_host <mysql_host> --mysql_port <mysql_port> --mys
 ## Example
 
 ```bash
-bash create_replica.sh --mysql_host 192.168.1.100 --mysql_port 3306 --mysql_user root --mysql_password mypassword
+bash replica_setup.sh --mysql_host 192.168.1.100 --mysql_port 3306 --mysql_user root --mysql_password mypassword
 ```
 
 This command sets up MyDuckServer as a replica of the MySQL instance running at `192.168.1.100` on port `3306` with the user `root` and password `mypassword`.

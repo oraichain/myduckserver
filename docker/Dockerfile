@@ -1,6 +1,6 @@
-# Step 1: Build stage
 # Use the official Go image for building the Go application
-FROM golang:1.23 AS builder
+# Step 1: Build stage
+FROM golang:1.22.7 AS builder
 
 # Set environment variables for cross-compilation
 ARG TARGETOS=linux
@@ -27,12 +27,31 @@ FROM debian:bookworm-slim
 ARG TARGETOS=linux
 ARG TARGETARCH
 
-# Install curl, libstdc++6, and other necessary tools
 RUN apt-get update && apt-get install -y \
+    vim \
+    procps \
     curl \
     unzip \
     libstdc++6 \
+    python3 \
+    python3-pip \
+    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir "sqlglot[rs]" --break-system-packages
+
+# Install mysql-shell
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        ARCH="arm"; \
+    else \
+        ARCH="x86"; \
+    fi && \
+    curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell-9.1.0-linux-glibc2.28-${ARCH}-64bit.tar.gz \
+    && tar -zxvf mysql-shell-9.1.0-linux-glibc2.28-${ARCH}-64bit.tar.gz \
+    && mv mysql-shell-9.1.0-linux-glibc2.28-${ARCH}-64bit /usr/local/mysqlsh \
+    && ln -s /usr/local/mysqlsh/bin/mysqlsh /usr/local/bin/mysqlsh \
+    && mysqlsh --version
 
 # Dynamic DuckDB CLI download based on architecture
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
@@ -49,20 +68,18 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 
 RUN duckdb -version
 
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-RUN pip install --no-cache-dir "sqlglot[rs]"  --break-system-packages
+RUN useradd --create-home --user-group --shell /bin/bash admin \
+    && echo 'admin:admin' | chpasswd \
+    && echo 'admin ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Set the working directory inside the container
-WORKDIR /app
+USER admin
+WORKDIR /home/admin
 
 # Copy the compiled Go binary from the builder stage
 COPY --from=builder /myduckserver /usr/local/bin/myduckserver
+COPY --chown=admin:admin --chmod=755 docker/*.sh .
+COPY --chown=admin:admin --chmod=755 devtools/replica-setup ./replica-setup
 
 ENV LC_CTYPE="en_US.UTF-8"
 ENV LANG="en_US.UTF-8"
@@ -71,4 +88,4 @@ ENV LANG="en_US.UTF-8"
 EXPOSE 3306
 
 # Set the default command to run the Go server
-CMD ["myduckserver"]
+ENTRYPOINT /home/admin/entrypoint.sh
