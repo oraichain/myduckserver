@@ -117,7 +117,9 @@ func (iter *SQLRowIter) Next(ctx *sql.Context) (sql.Row, error) {
 
 	// Prune or fill the values to match the schema
 	width := len(iter.schema) // the desired width
-	if len(iter.columns) < width {
+	if width == 0 {
+		width = len(iter.columns)
+	} else if len(iter.columns) < width {
 		for i := len(iter.columns); i < width; i++ {
 			iter.buffer[i] = nil
 		}

@@ -22,6 +22,7 @@ import (
 	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/catalog"
 	"github.com/apecloud/myduckserver/myfunc"
+	"github.com/apecloud/myduckserver/pgserver"
 	"github.com/apecloud/myduckserver/plugin"
 	"github.com/apecloud/myduckserver/replica"
 	"github.com/apecloud/myduckserver/transpiler"
@@ -44,6 +45,7 @@ var (
 	address       = "0.0.0.0"
 	port          = 3306
 	socket        string
+	postgresPort  = 5432
 	dataDirectory = "."
 	dbFileName    = "mysql.db"
 	logLevel      = int(logrus.InfoLevel)
@@ -57,6 +59,8 @@ func init() {
 	flag.StringVar(&socket, "socket", socket, "The Unix domain socket to bind to.")
 	flag.StringVar(&dataDirectory, "datadir", dataDirectory, "The directory to store the database.")
 	flag.IntVar(&logLevel, "loglevel", logLevel, "The log level to use.")
+
+	flag.IntVar(&postgresPort, "pg-port", postgresPort, "The port to bind to for PostgreSQL wire protocol.")
 
 	// The following options need to be set for MySQL Shell's utilities to work properly.
 
@@ -115,11 +119,20 @@ func main() {
 		Address:  fmt.Sprintf("%s:%d", address, port),
 		Socket:   socket,
 	}
-	s, err := server.NewServerWithHandler(config, engine, backend.NewSessionBuilder(provider, pool), nil, backend.WrapHandler(pool))
+	srv, err := server.NewServerWithHandler(config, engine, backend.NewSessionBuilder(provider, pool), nil, backend.WrapHandler(pool))
 	if err != nil {
 		panic(err)
 	}
-	if err = s.Start(); err != nil {
+
+	if postgresPort > 0 {
+		pgServer, err := pgserver.NewServer(srv, address, postgresPort)
+		if err != nil {
+			panic(err)
+		}
+		go pgServer.Start()
+	}
+
+	if err = srv.Start(); err != nil {
 		panic(err)
 	}
 }

@@ -6,10 +6,13 @@ require (
 	github.com/Shopify/toxiproxy/v2 v2.9.0
 	github.com/apache/arrow/go/v17 v17.0.0
 	github.com/cockroachdb/apd/v3 v3.2.1
+	github.com/dolthub/doltgresql v0.13.0
 	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772
 	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e
 	github.com/go-sql-driver/mysql v1.8.1
+	github.com/jackc/pgx/v5 v5.7.1
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/lib/pq v1.10.9
 	github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697
 	github.com/prometheus/client_golang v1.20.3
 	github.com/rs/zerolog v1.33.0
@@ -23,7 +26,7 @@ require (
 
 replace (
 	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772 => github.com/fanyang01/go-mysql-server v0.0.0-20241021025444-83e2e88c99aa
-	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e => github.com/apecloud/dolt-vitess v0.0.0-20241017031156-06988c627a21
+	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e => github.com/apecloud/dolt-vitess v0.0.0-20241028060845-4a2a0444a0ac
 )
 
 require (
@@ -36,7 +39,6 @@ require (
 	github.com/dolthub/flatbuffers/v23 v23.3.3-dh.2 // indirect
 	github.com/dolthub/go-icu-regex v0.0.0-20240916130659-0118adc6b662 // indirect
 	github.com/dolthub/jsonpath v0.0.2-0.20240227200619-19675ab05c71 // indirect
-	github.com/dolthub/sqllogictest/go v0.0.0-20240618184124-ca47f9354216 // indirect
 	github.com/go-kit/kit v0.10.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/gocraft/dbr/v2 v2.7.2 // indirect
@@ -62,9 +64,11 @@ require (
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tetratelabs/wazero v1.1.0 // indirect
+	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opentelemetry.io/otel v1.30.0 // indirect
 	go.opentelemetry.io/otel/trace v1.30.0 // indirect
+	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
