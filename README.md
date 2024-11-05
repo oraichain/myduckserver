@@ -8,7 +8,7 @@ While MySQL is a popular go-to choice for OLTP, its performance in analytics oft
 
 With MyDuck Server, you can:
 
-- **Accelate MySQL analytics** by running analytical queries on your MySQL data at speeds several orders of magnitude faster 🚀
+- **Accelerate MySQL analytics** by running analytical queries on your MySQL data at speeds several orders of magnitude faster 🚀
 - **Keep familiar tools**—there’s no need to change your existing MySQL-based data analysis toolchains 🛠️
 - **Go beyond MySQL syntax** through DuckDB’s full power to expand your analytics potential 💥
 - **Run DuckDB in server mode** to share a DuckDB instance with your team or among your applications 🌩️
