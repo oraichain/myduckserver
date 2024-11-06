@@ -110,7 +110,7 @@ docker run \
   --network=host \
   --privileged \
   --workdir=/home/admin \
-  --env=SETUP_MODE=combined \
+  --env=SETUP_MODE=COMBINED \
   --env=MYSQL_HOST=<mysql_host> \
   --env=MYSQL_PORT=<mysql_port> \
   --env=MYSQL_USER=<mysql_user> \
@@ -118,7 +118,8 @@ docker run \
   --detach=true \
   apecloud/myduckserver:latest
 ```
-
+## Connect to Cloud MySQL
+MyDuckServer supports setting up replicas from various MySQL-based database, you can see it on [replica-setup.md](docs/tutorial/replica-setup-rds).
 
 ## 💡 Contributing
 

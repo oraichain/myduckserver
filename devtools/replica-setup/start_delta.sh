@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [[ $SOURCE_IS_EMPTY -eq 0 ]]; then
+  EXECUTED_GTID_SET=$(mysqlsh --host="$MYSQL_HOST" --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --sql -e "SHOW BINARY LOG STATUS\G" | grep -i "Executed_Gtid_Set" | awk -F': ' '{print $2}')
+fi
+
 # Use the EXECUTED_GTID_SET variable from the previous steps
 if [ -z "$EXECUTED_GTID_SET" ]; then
   echo "Executed_GTID_set is empty, exiting."

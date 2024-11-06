@@ -6,36 +6,33 @@ usage() {
     exit 1
 }
 
-# Parse input parameters
+# Parse input parameters using a more efficient approach
 while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
+    case $1 in
         --mysql_host)
-        MYSQL_HOST="$2"
-        shift # past argument
-        shift # past value
-        ;;
+            MYSQL_HOST="$2"
+            shift 2
+            ;;
         --mysql_port)
-        MYSQL_PORT="$2"
-        shift
-        shift
-        ;;
+            MYSQL_PORT="$2"
+            shift 2
+            ;;
         --mysql_user)
-        MYSQL_USER="$2"
-        shift
-        shift
-        ;;
+            MYSQL_USER="$2"
+            shift 2
+            ;;
         --mysql_password)
-        MYSQL_PASSWORD="$2"
-        shift
-        shift
-        ;;
+            MYSQL_PASSWORD="$2"
+            shift 2
+            ;;
         *)
-        echo "Unknown parameter: $1"
-        usage
-        ;;
+            echo "Unknown parameter: $1"
+            usage
+            ;;
     esac
 done
+
+source checker.sh
 
 # Check if all parameters are set
 if [[ -z "$MYSQL_HOST" || -z "$MYSQL_PORT" || -z "$MYSQL_USER" || -z "$MYSQL_PASSWORD" ]]; then
@@ -43,44 +40,43 @@ if [[ -z "$MYSQL_HOST" || -z "$MYSQL_PORT" || -z "$MYSQL_USER" || -z "$MYSQL_PAS
     usage
 fi
 
-# Step 1: Check if mysqlsh exists, if not, call install_mysql_shell.sh
+# Step 1: Check if mysqlsh exists, if not, install it
 if ! command -v mysqlsh &> /dev/null; then
     echo "mysqlsh not found, attempting to install..."
     bash install_mysql_shell.sh
-    if [[ $? -ne 0 ]]; then
-        echo "Failed to install MySQL Shell. Exiting."
-        exit 1
-    fi
+    check_command "mysqlsh installation"
 else
     echo "mysqlsh is already installed."
 fi
 
 # Step 2: Check if Replica of MyDuckServer has already been started
-REPLICA_STATUS=$(mysqlsh --sql --host=127.0.0.1 --user=root --port=3306 --password='' -e "SHOW REPLICA STATUS\G")
-SOURCE_HOST=$(echo "$REPLICA_STATUS" | awk '/Source_Host/ {print $2}')
-
-# Check if Source_Host is not null or empty
-if [[ -n "$SOURCE_HOST" ]]; then
-  echo "Replica has already been started. Source Host: $SOURCE_HOST"
-  exit 1
-else
-  echo "No replica has been started. Proceeding with setup."
-fi
-
-# Step 3: Call start_snapshot.sh with MySQL parameters
-echo "Starting snapshot..."
-source start_snapshot.sh
+echo "Checking if replica of MyDuckServer has already been started..."
+check_if_myduckserver_already_have_replica
 if [[ $? -ne 0 ]]; then
-    echo "Failed to start snapshot. Exiting."
+    echo "Replica has already been started. Exiting."
     exit 1
 fi
 
-# Step 4: Call start_delta.sh with MySQL parameters
+# Step 3: Check MySQL server and user configuration
+echo "Checking MySQL server and user configuration..."
+check_mysql_config
+check_command "MySQL server and user configuration check"
+
+# Step 4: Check if source MySQL server is empty
+echo "Checking if source MySQL server is empty..."
+check_if_source_mysql_is_empty
+SOURCE_IS_EMPTY=$?
+
+# Step 5: Call start_snapshot.sh with MySQL parameters if MySQL server is not empty
+if [[ $SOURCE_IS_EMPTY -ne 0 ]]; then
+    echo "Starting snapshot..."
+    source start_snapshot.sh
+    check_command "starting snapshot"
+else
+    echo "Source MySQL server is empty. Skipping snapshot."
+fi
+
+# Step 6: Call start_delta.sh with MySQL parameters
 echo "Starting delta..."
 source start_delta.sh
-if [[ $? -ne 0 ]]; then
-    echo "Failed to start delta. Exiting."
-    exit 1
-fi
-
-echo "All steps completed successfully."
+check_command "starting delta"

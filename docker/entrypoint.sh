@@ -15,7 +15,7 @@ run_replica_setup() {
     cd "$REPLICA_SETUP_PATH" || { echo "Error: Could not change directory to ${REPLICA_SETUP_PATH}"; exit 1; }
 
     # Run replica_setup.sh and check for errors
-    if bash replica_setup.sh --mysql_host "$MYSQL_HOST" --mysql_port "$MYSQL_PORT" --mysql_user "$MYSQL_PORT" --mysql_password "$MYSQL_PASSWORD"; then
+    if bash replica_setup.sh --mysql_host "$MYSQL_HOST" --mysql_port "$MYSQL_PORT" --mysql_user "$MYSQL_USER" --mysql_password "$MYSQL_PASSWORD"; then
         echo "Replica setup completed."
     else
         echo "Error: Replica setup failed."
