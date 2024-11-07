@@ -27,6 +27,7 @@ import (
 
 	"github.com/apecloud/myduckserver/adapter"
 	"github.com/apecloud/myduckserver/backend"
+	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
 	sqle "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/go-mysql-server/sql"
@@ -36,7 +37,6 @@ import (
 	"github.com/dolthub/vitess/go/mysql"
 	"github.com/dolthub/vitess/go/vt/sqlparser"
 	"github.com/jackc/pgx/v5/pgproto3"
-	"github.com/lib/pq/oid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -113,40 +113,41 @@ func (h *DuckHandler) ComExecuteBound(ctx context.Context, conn *mysql.Conn, que
 }
 
 // ComPrepareParsed implements the Handler interface.
-func (h *DuckHandler) ComPrepareParsed(ctx context.Context, c *mysql.Conn, query string, parsed sqlparser.Statement) (mysql.ParsedQuery, []pgproto3.FieldDescription, error) {
-	sqlCtx, err := h.sm.NewContextWithQuery(ctx, c, query)
-	if err != nil {
-		return nil, nil, err
-	}
+func (h *DuckHandler) ComPrepareParsed(ctx context.Context, c *mysql.Conn, query string, parsed tree.Statement) ([]pgproto3.FieldDescription, error) {
+	return nil, fmt.Errorf("not implemented")
+	// sqlCtx, err := h.sm.NewContextWithQuery(ctx, c, query)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	analyzed, err := h.e.PrepareParsedQuery(sqlCtx, query, query, parsed)
-	if err != nil {
-		if printErrorStackTraces {
-			fmt.Printf("unable to prepare query: %+v\n", err)
-		}
-		logrus.WithField("query", query).Errorf("unable to prepare query: %s", err.Error())
-		err := sql.CastSQLError(err)
-		return nil, nil, err
-	}
+	// analyzed, err := h.e.PrepareParsedQuery(sqlCtx, query, query, parsed)
+	// if err != nil {
+	// 	if printErrorStackTraces {
+	// 		fmt.Printf("unable to prepare query: %+v\n", err)
+	// 	}
+	// 	logrus.WithField("query", query).Errorf("unable to prepare query: %s", err.Error())
+	// 	err := sql.CastSQLError(err)
+	// 	return nil, nil, err
+	// }
 
-	var fields []pgproto3.FieldDescription
-	// The query is not a SELECT statement if it corresponds to an OK result.
-	if nodeReturnsOkResultSchema(analyzed) {
-		fields = []pgproto3.FieldDescription{
-			{
-				Name:         []byte("Rows"),
-				DataTypeOID:  uint32(oid.T_int4),
-				DataTypeSize: 4,
-			},
-		}
-	} else {
-		fields = schemaToFieldDescriptions(sqlCtx, analyzed.Schema())
-	}
-	return analyzed, fields, nil
+	// var fields []pgproto3.FieldDescription
+	// // The query is not a SELECT statement if it corresponds to an OK result.
+	// if nodeReturnsOkResultSchema(analyzed) {
+	// 	fields = []pgproto3.FieldDescription{
+	// 		{
+	// 			Name:         []byte("Rows"),
+	// 			DataTypeOID:  uint32(oid.T_int4),
+	// 			DataTypeSize: 4,
+	// 		},
+	// 	}
+	// } else {
+	// 	fields = schemaToFieldDescriptions(sqlCtx, analyzed.Schema())
+	// }
+	// return analyzed, fields, nil
 }
 
 // ComQuery implements the Handler interface.
-func (h *DuckHandler) ComQuery(ctx context.Context, c *mysql.Conn, query string, parsed sqlparser.Statement, callback func(*Result) error) error {
+func (h *DuckHandler) ComQuery(ctx context.Context, c *mysql.Conn, query string, parsed tree.Statement, callback func(*Result) error) error {
 	err := h.doQuery(ctx, c, query, parsed, nil, h.executeQuery, callback)
 	if err != nil {
 		err = sql.CastSQLError(err)
@@ -199,15 +200,15 @@ func (h *DuckHandler) NewContext(ctx context.Context, c *mysql.Conn, query strin
 
 var queryLoggingRegex = regexp.MustCompile(`[\r\n\t ]+`)
 
-func (h *DuckHandler) doQuery(ctx context.Context, c *mysql.Conn, query string, parsed sqlparser.Statement, analyzedPlan sql.Node, queryExec QueryExecutor, callback func(*Result) error) error {
-	logrus.WithFields(logrus.Fields{
-		"query": query,
-	}).Info("doQuery")
-
+func (h *DuckHandler) doQuery(ctx context.Context, c *mysql.Conn, query string, parsed tree.Statement, analyzedPlan sql.Node, queryExec QueryExecutor, callback func(*Result) error) error {
 	sqlCtx, err := h.sm.NewContextWithQuery(ctx, c, query)
 	if err != nil {
 		return err
 	}
+	sqlCtx.GetLogger().WithFields(logrus.Fields{
+		"query":    query,
+		"protocol": "postgres",
+	}).Trace("doQuery")
 
 	start := time.Now()
 	var queryStrToLog string
@@ -242,6 +243,11 @@ func (h *DuckHandler) doQuery(ctx context.Context, c *mysql.Conn, query string, 
 		}
 		sqlCtx.GetLogger().WithError(err).Warn("error running query")
 		return err
+	}
+
+	// If the query is "USE <database>", we need to update the current database in the session.
+	if currentSchema := sqlCtx.Session.(*backend.Session).CurrentSchemaOfUnderlyingConn(); len(currentSchema) > 0 {
+		sqlCtx.SetCurrentDatabase(currentSchema)
 	}
 
 	// create result before goroutines to avoid |ctx| racing
@@ -280,11 +286,11 @@ func (h *DuckHandler) doQuery(ctx context.Context, c *mysql.Conn, query string, 
 
 // QueryExecutor is a function that executes a query and returns the result as a schema and iterator. Either of
 // |parsed| or |analyzed| can be nil depending on the use case
-type QueryExecutor func(ctx *sql.Context, query string, parsed sqlparser.Statement, analyzed sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error)
+type QueryExecutor func(ctx *sql.Context, query string, parsed tree.Statement, analyzed sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error)
 
 // executeQuery is a QueryExecutor that calls QueryWithBindings on the given engine using the given query and parsed
 // statement, which may be nil.
-func (h *DuckHandler) executeQuery(ctx *sql.Context, query string, parsed sqlparser.Statement, _ sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
+func (h *DuckHandler) executeQuery(ctx *sql.Context, query string, parsed tree.Statement, _ sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
 	// return h.e.QueryWithBindings(ctx, query, parsed, nil, nil)
 
 	sql.IncrementStatusVariable(ctx, "Questions", 1)
@@ -335,7 +341,7 @@ func (h *DuckHandler) executeQuery(ctx *sql.Context, query string, parsed sqlpar
 
 // executeBoundPlan is a QueryExecutor that calls QueryWithBindings on the given engine using the given query and parsed
 // statement, which may be nil.
-func (h *DuckHandler) executeBoundPlan(ctx *sql.Context, query string, _ sqlparser.Statement, plan sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
+func (h *DuckHandler) executeBoundPlan(ctx *sql.Context, query string, _ tree.Statement, plan sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
 	return h.e.PrepQueryPlanForExecution(ctx, query, plan)
 }
 

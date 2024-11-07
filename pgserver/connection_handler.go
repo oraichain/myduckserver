@@ -15,6 +15,8 @@
 package pgserver
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -26,6 +28,8 @@ import (
 	"unicode"
 
 	"github.com/apecloud/myduckserver/backend"
+	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/parser"
+	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
@@ -41,7 +45,7 @@ type ConnectionHandler struct {
 	mysqlConn          *mysql.Conn
 	preparedStatements map[string]PreparedStatementData
 	portals            map[string]PortalData
-	doltgresHandler    *DuckHandler
+	duckHandler        *DuckHandler
 	backend            *pgproto3.Backend
 	pgTypeMap          *pgtype.Map
 	waitForSync        bool
@@ -79,7 +83,7 @@ func NewConnectionHandler(conn net.Conn, handler mysql.Handler, server *server.S
 
 	// TODO: possibly should define engine and session manager ourselves
 	//  instead of depending on the GetRunningServer method.
-	doltgresHandler := &DuckHandler{
+	duckHandler := &DuckHandler{
 		e:                 server.Engine,
 		sm:                server.SessionManager(),
 		readTimeout:       0,     // cfg.ConnReadTimeout,
@@ -90,7 +94,7 @@ func NewConnectionHandler(conn net.Conn, handler mysql.Handler, server *server.S
 		mysqlConn:          mysqlConn,
 		preparedStatements: preparedStatements,
 		portals:            portals,
-		doltgresHandler:    doltgresHandler,
+		duckHandler:        duckHandler,
 		backend:            pgproto3.NewBackend(conn, conn),
 		pgTypeMap:          pgtype.NewMap(),
 	}
@@ -127,13 +131,13 @@ func (h *ConnectionHandler) HandleConnection() {
 				fmt.Println(returnErr.Error())
 			}
 
-			h.doltgresHandler.ConnectionClosed(h.mysqlConn)
+			h.duckHandler.ConnectionClosed(h.mysqlConn)
 			if err := h.Conn().Close(); err != nil {
 				fmt.Printf("Failed to properly close connection:\n%v\n", err)
 			}
 		}()
 	}
-	h.doltgresHandler.NewConnection(h.mysqlConn)
+	h.duckHandler.NewConnection(h.mysqlConn)
 
 	if proceed, err := h.handleStartup(); err != nil || !proceed {
 		returnErr = err
@@ -251,11 +255,12 @@ func (h *ConnectionHandler) chooseInitialDatabase(startupMessage *pgproto3.Start
 		db = h.mysqlConn.User
 	}
 	useStmt := fmt.Sprintf("USE %s;", db)
-	parsed, err := sql.GlobalParser.ParseSimple(useStmt)
+	setStmt := fmt.Sprintf("SET database TO %s;", db)
+	parsed, err := parser.ParseOne(setStmt)
 	if err != nil {
 		return err
 	}
-	err = h.doltgresHandler.ComQuery(context.Background(), h.mysqlConn, useStmt, parsed, func(res *Result) error {
+	err = h.duckHandler.ComQuery(context.Background(), h.mysqlConn, useStmt, parsed.AST, func(res *Result) error {
 		return nil
 	})
 	// If a database isn't specified, then we attempt to connect to a database with the same name as the user,
@@ -339,7 +344,7 @@ func (h *ConnectionHandler) receiveMessage() (bool, error) {
 // |endOfMessages| response parameter is true, it indicates that no more messages are expected for the current operation
 // and a READY FOR QUERY message should be sent back to the client, so it can send the next query.
 func (h *ConnectionHandler) handleMessage(msg pgproto3.Message) (stop, endOfMessages bool, err error) {
-	logrus.Infof("Handling message: %T", msg)
+	logrus.Tracef("Handling message: %T", msg)
 	switch message := msg.(type) {
 	case *pgproto3.Terminate:
 		return true, false, nil
@@ -415,21 +420,18 @@ func (h *ConnectionHandler) handleQuery(message *pgproto3.Query) (endOfMessages 
 // and any error that occurred while handling the query.
 func (h *ConnectionHandler) handleQueryOutsideEngine(query ConvertedQuery) (handled bool, endOfMessages bool, err error) {
 	switch stmt := query.AST.(type) {
-	case *sqlparser.Deallocate:
+	case *tree.Deallocate:
 		// TODO: handle ALL keyword
-		return true, true, h.deallocatePreparedStatement(stmt.Name, h.preparedStatements, query, h.Conn())
-	case sqlparser.InjectedStatement:
-		// switch injectedStmt := stmt.Statement.(type) {
-		// case node.DiscardStatement:
-		// 	return true, true, h.discardAll(query)
-		// case *node.CopyFrom:
-		// 	// When copying data from STDIN, the data is sent to the server as CopyData messages
-		// 	// We send endOfMessages=false since the server will be in COPY DATA mode and won't
-		// 	// be ready for more queries util COPY DATA mode is completed.
-		// 	if injectedStmt.Stdin {
-		// 		return true, false, h.handleCopyFromStdinQuery(injectedStmt, h.Conn())
-		// 	}
-		// }
+		return true, true, h.deallocatePreparedStatement(stmt.Name.String(), h.preparedStatements, query, h.Conn())
+	case *tree.Discard:
+		return true, true, h.discardAll(query)
+	case *tree.CopyFrom:
+		// When copying data from STDIN, the data is sent to the server as CopyData messages
+		// We send endOfMessages=false since the server will be in COPY DATA mode and won't
+		// be ready for more queries util COPY DATA mode is completed.
+		if stmt.Stdin {
+			return true, false, h.handleCopyFromStdinQuery(query, stmt, h.Conn())
+		}
 	}
 	return false, true, nil
 }
@@ -452,14 +454,9 @@ func (h *ConnectionHandler) handleParse(message *pgproto3.Parse) error {
 		return nil
 	}
 
-	parsedQuery, fields, err := h.doltgresHandler.ComPrepareParsed(context.Background(), h.mysqlConn, query.String, query.AST)
+	fields, err := h.duckHandler.ComPrepareParsed(context.Background(), h.mysqlConn, query.String, query.AST)
 	if err != nil {
 		return err
-	}
-
-	_, ok := parsedQuery.(sql.Node)
-	if !ok {
-		return fmt.Errorf("expected a sql.Node, got %T", parsedQuery)
 	}
 
 	// A valid Parse message must have ParameterObjectIDs if there are any binding variables.
@@ -535,7 +532,7 @@ func (h *ConnectionHandler) handleBind(message *pgproto3.Bind) error {
 		return err
 	}
 
-	analyzedPlan, fields, err := h.doltgresHandler.ComBind(context.Background(), h.mysqlConn, preparedData.Query.String, preparedData.Query.AST, bindVars)
+	analyzedPlan, fields, err := h.duckHandler.ComBind(context.Background(), h.mysqlConn, preparedData.Query.String, preparedData.Query.AST, bindVars)
 	if err != nil {
 		return err
 	}
@@ -580,7 +577,7 @@ func (h *ConnectionHandler) handleExecute(message *pgproto3.Execute) error {
 	rowsAffected := int32(0)
 
 	callback := h.spoolRowsCallback(query.StatementTag, &rowsAffected, true)
-	err = h.doltgresHandler.ComExecuteBound(context.Background(), h.mysqlConn, query.String, portalData.BoundPlan, callback)
+	err = h.duckHandler.ComExecuteBound(context.Background(), h.mysqlConn, query.String, portalData.BoundPlan, callback)
 	if err != nil {
 		return err
 	}
@@ -621,60 +618,61 @@ func (h *ConnectionHandler) handleCopyDataHelper(message *pgproto3.CopyData) (st
 		return false, true, fmt.Errorf("COPY DATA message received without a COPY FROM STDIN operation in progress")
 	}
 
-	// // Grab a sql.Context and ensure the session has a transaction started, otherwise the copied data
-	// // won't get committed correctly.
-	// sqlCtx, err := h.doltgresHandler.NewContext(context.Background(), h.mysqlConn, "")
-	// if err != nil {
-	// 	return false, false, err
-	// }
-	// if err = startTransaction(sqlCtx); err != nil {
-	// 	return false, false, err
-	// }
+	// Grab a sql.Context and ensure the session has a transaction started, otherwise the copied data
+	// won't get committed correctly.
+	sqlCtx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, "")
+	if err != nil {
+		return false, false, err
+	}
+	if err = startTransaction(sqlCtx); err != nil {
+		return false, false, err
+	}
 
-	// dataLoader := h.copyFromStdinState.dataLoader
-	// if dataLoader == nil {
-	// 	copyFromStdinNode := h.copyFromStdinState.copyFromStdinNode
-	// 	if copyFromStdinNode == nil {
-	// 		return false, false, fmt.Errorf("no COPY FROM STDIN node found")
-	// 	}
+	dataLoader := h.copyFromStdinState.dataLoader
+	if dataLoader == nil {
+		copyFrom := h.copyFromStdinState.copyFromStdinNode
+		if copyFrom == nil {
+			return false, false, fmt.Errorf("no COPY FROM STDIN node found")
+		}
 
-	// 	// TODO: It would be better to get the table from the copyFromStdinNode – not by calling core.GetSqlTableFromContext
-	// 	table, err := core.GetSqlTableFromContext(sqlCtx, copyFromStdinNode.DatabaseName, copyFromStdinNode.TableName)
-	// 	if err != nil {
-	// 		return false, true, err
-	// 	}
-	// 	if table == nil {
-	// 		return false, true, fmt.Errorf(`relation "%s" does not exist`, copyFromStdinNode.TableName.String())
-	// 	}
-	// 	insertableTable, ok := table.(sql.InsertableTable)
-	// 	if !ok {
-	// 		return false, true, fmt.Errorf(`table "%s" is read-only`, copyFromStdinNode.TableName.String())
-	// 	}
+		// TODO: It would be better to get the table from the copyFromStdinNode – not by calling core.GetSqlTableFromContext
+		schemaName := copyFrom.Table.Schema()
+		tableName := copyFrom.Table.Table()
+		table, err := GetSqlTableFromContext(sqlCtx, schemaName, tableName)
+		if err != nil {
+			return false, true, err
+		}
+		if table == nil {
+			return false, true, fmt.Errorf(`relation "%s" does not exist`, tableName)
+		}
+		insertableTable, ok := table.(sql.InsertableTable)
+		if !ok {
+			return false, true, fmt.Errorf(`table "%s" is read-only`, tableName)
+		}
 
-	// 	switch copyFromStdinNode.CopyOptions.CopyFormat {
-	// 	case tree.CopyFormatText:
-	// 		dataLoader, err = dataloader.NewTabularDataLoader(sqlCtx, insertableTable, copyFromStdinNode.CopyOptions.Delimiter, "", copyFromStdinNode.CopyOptions.Header)
-	// 	case tree.CopyFormatCsv:
-	// 		dataLoader, err = dataloader.NewCsvDataLoader(sqlCtx, insertableTable, copyFromStdinNode.CopyOptions.Delimiter, copyFromStdinNode.CopyOptions.Header)
-	// 	case tree.CopyFormatBinary:
-	// 		err = fmt.Errorf("BINARY format is not supported for COPY FROM")
-	// 	default:
-	// 		err = fmt.Errorf("unknown format specified for COPY FROM: %v",
-	// 			copyFromStdinNode.CopyOptions.CopyFormat)
-	// 	}
+		switch copyFrom.Options.CopyFormat {
+		case tree.CopyFormatText:
+		case tree.CopyFormatCSV:
+			dataLoader, err = NewCsvDataLoader(sqlCtx, h.duckHandler, insertableTable, copyFrom.Columns, &copyFrom.Options)
+		case tree.CopyFormatBinary:
+			err = fmt.Errorf("BINARY format is not supported for COPY FROM")
+		default:
+			err = fmt.Errorf("unknown format specified for COPY FROM: %v",
+				copyFrom.Options.CopyFormat)
+		}
 
-	// 	if err != nil {
-	// 		return false, false, err
-	// 	}
+		if err != nil {
+			return false, false, err
+		}
 
-	// 	h.copyFromStdinState.dataLoader = dataLoader
-	// }
+		h.copyFromStdinState.dataLoader = dataLoader
+	}
 
-	// byteReader := bytes.NewReader(message.Data)
-	// reader := bufio.NewReader(byteReader)
-	// if err = dataLoader.LoadChunk(sqlCtx, reader); err != nil {
-	// 	return false, false, err
-	// }
+	byteReader := bytes.NewReader(message.Data)
+	reader := bufio.NewReader(byteReader)
+	if err = dataLoader.LoadChunk(sqlCtx, reader); err != nil {
+		return false, false, err
+	}
 
 	// We expect to see more CopyData messages until we see either a CopyDone or CopyFail message, so
 	// return false for endOfMessages
@@ -705,7 +703,7 @@ func (h *ConnectionHandler) handleCopyDone(_ *pgproto3.CopyDone) (stop bool, end
 			fmt.Errorf("no data loader found for COPY FROM STDIN operation")
 	}
 
-	sqlCtx, err := h.doltgresHandler.NewContext(context.Background(), h.mysqlConn, "")
+	sqlCtx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, "")
 	if err != nil {
 		return false, false, err
 	}
@@ -815,7 +813,7 @@ func (h *ConnectionHandler) query(query ConvertedQuery) error {
 	rowsAffected := int32(0)
 
 	callback := h.spoolRowsCallback(query.StatementTag, &rowsAffected, false)
-	err := h.doltgresHandler.ComQuery(context.Background(), h.mysqlConn, query.String, query.AST, callback)
+	err := h.duckHandler.ComQuery(context.Background(), h.mysqlConn, query.String, query.AST, callback)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "syntax error at position") {
 			return fmt.Errorf("This statement is not yet supported")
@@ -1010,31 +1008,17 @@ func (h *ConnectionHandler) sendError(err error) {
 
 // convertQuery takes the given Postgres query, and converts it as an ast.ConvertedQuery that will work with the handler.
 func (h *ConnectionHandler) convertQuery(query string) (ConvertedQuery, error) {
-	// s, err := parser.Parse(query)
-	// if err != nil {
-	// 	return ConvertedQuery{}, err
-	// }
-	// if len(s) > 1 {
-	// 	return ConvertedQuery{}, fmt.Errorf("only a single statement at a time is currently supported")
-	// }
-	// if len(s) == 0 {
-	// 	return ConvertedQuery{String: query}, nil
-	// }
-	// vitessAST, err := ast.Convert(s[0])
-	// stmtTag := s[0].AST.StatementTag()
-	// if err != nil {
-	// 	return ConvertedQuery{}, err
-	// }
-	// if vitessAST == nil {
-	// 	return ConvertedQuery{
-	// 		String:       s[0].AST.String(),
-	// 		StatementTag: stmtTag,
-	// 	}, nil
-	// }
-
-	ast, err := sql.GlobalParser.ParseSimple(query)
+	stmts, err := parser.Parse(query)
 	if err != nil {
-		ast, _ = sql.GlobalParser.ParseSimple("SELECT 'incompatible query' AS error")
+		// DuckDB syntax is not fully compatible with PostgreSQL, so we need to handle some queries differently.
+		stmts, _ = parser.Parse("SELECT 'SQL syntax is incompatible with PostgreSQL' AS error")
+	}
+
+	if len(stmts) > 1 {
+		return ConvertedQuery{}, fmt.Errorf("only a single statement at a time is currently supported")
+	}
+	if len(stmts) == 0 {
+		return ConvertedQuery{String: query}, nil
 	}
 
 	query = sql.RemoveSpaceAndDelimiter(query, ';')
@@ -1048,14 +1032,14 @@ func (h *ConnectionHandler) convertQuery(query string) (ConvertedQuery, error) {
 
 	return ConvertedQuery{
 		String:       query,
-		AST:          ast,
+		AST:          stmts[0].AST,
 		StatementTag: stmtTag,
 	}, nil
 }
 
 // discardAll handles the DISCARD ALL command
 func (h *ConnectionHandler) discardAll(query ConvertedQuery) error {
-	err := h.doltgresHandler.ComResetConnection(h.mysqlConn)
+	err := h.duckHandler.ComResetConnection(h.mysqlConn)
 	if err != nil {
 		return err
 	}
@@ -1068,24 +1052,25 @@ func (h *ConnectionHandler) discardAll(query ConvertedQuery) error {
 // handleCopyFromStdinQuery handles the COPY FROM STDIN query at the Doltgres layer, without passing it to the engine.
 // COPY FROM STDIN can't be handled directly by the GMS engine, since COPY FROM STDIN relies on multiple messages sent
 // over the wire.
-// func (h *ConnectionHandler) handleCopyFromStdinQuery(copyFrom *node.CopyFrom, conn net.Conn) error {
-// 	sqlCtx, err := h.doltgresHandler.NewContext(context.Background(), h.mysqlConn, "")
-// 	if err != nil {
-// 		return err
-// 	}
+func (h *ConnectionHandler) handleCopyFromStdinQuery(query ConvertedQuery, copyFrom *tree.CopyFrom, conn net.Conn) error {
+	sqlCtx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, query.String)
+	if err != nil {
+		return err
+	}
+	sqlCtx.SetLogger(sqlCtx.GetLogger().WithField("query", query.String))
 
-// 	if err := copyFrom.Validate(sqlCtx); err != nil {
-// 		return err
-// 	}
+	if err := ValidateCopyFrom(copyFrom, sqlCtx); err != nil {
+		return err
+	}
 
-// 	h.copyFromStdinState = &copyFromStdinState{
-// 		copyFromStdinNode: copyFrom,
-// 	}
+	h.copyFromStdinState = &copyFromStdinState{
+		copyFromStdinNode: copyFrom,
+	}
 
-// 	return h.send(&pgproto3.CopyInResponse{
-// 		OverallFormat: 0,
-// 	})
-// }
+	return h.send(&pgproto3.CopyInResponse{
+		OverallFormat: 0,
+	})
+}
 
 // DiscardToSync discards all messages in the buffer until a Sync has been reached. If a Sync was never sent, then this
 // may cause the connection to lock until the client send a Sync, as their request structure was malformed.

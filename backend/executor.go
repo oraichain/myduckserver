@@ -47,6 +47,10 @@ func NewDuckBuilder(base sql.NodeExecBuilder, pool *ConnectionPool, provider *ca
 	}
 }
 
+func (b *DuckBuilder) Provider() *catalog.DatabaseProvider {
+	return b.provider
+}
+
 func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.RowIter, error) {
 	// Flush the delta buffer before executing the query.
 	// TODO(fan): Be fine-grained and flush only when the replicated tables are touched.

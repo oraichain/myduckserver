@@ -1,7 +1,4 @@
-# This workflow will build a golang project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
-
-name: Go
+name: psql Test
 
 on:
   push:
@@ -39,14 +36,20 @@ jobs:
         duckdb -c 'INSTALL json from core'
         duckdb -c 'SELECT extension_name, loaded, install_path FROM duckdb_extensions() where installed'
 
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends postgresql-client
+
     - name: Build
       run: go build -v
     
-    - name: Test packages
-      run: go test -v -cover ./charset ./transpiler ./backend ./harness
-
-    - name: Test Query Engine
-      run: go test -v -cover --timeout 600s .
-
-    - name: Test Binlog Replication
-      run: go test -v -p 1 --timeout 360s ./binlogreplication
+    - name: Start MyDuck Server
+      run: |
+        ./myduckserver &
+        sleep 5
+    
+    - name: Run the SQL scripts
+      run: |
+        # for each SQL script in the `pgtest/psql` directory (recursively)
+        for f in pgtest/psql/**/*.sql; do
+          psql -h 127.0.0.1 -U mysql -f $f
+        done
