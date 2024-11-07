@@ -10,3 +10,4 @@ myduckserver
 .vscode/
 pipes/
 *.sock
+__debug_*

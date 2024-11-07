@@ -17,18 +17,16 @@ package backend
 import (
 	"context"
 	"fmt"
+
 	"github.com/dolthub/go-mysql-server/server"
 	"github.com/dolthub/vitess/go/mysql"
-	"regexp"
+	"github.com/dolthub/vitess/go/sqltypes"
 )
 
 type MyHandler struct {
 	*server.Handler
 	pool *ConnectionPool
 }
-
-// Precompile regex for performance
-var autoIncrementRegex = regexp.MustCompile(`AUTO_INCREMENT=\d+`)
 
 func (h *MyHandler) ConnectionClosed(c *mysql.Conn) {
 	h.pool.CloseConn(c.ConnectionID)
@@ -43,6 +41,29 @@ func (h *MyHandler) ComInitDB(c *mysql.Conn, schemaName string) error {
 	return h.Handler.ComInitDB(c, schemaName)
 }
 
+func wrapResultCallback(callback mysql.ResultSpoolFn, modifiers ...ResultModifier) mysql.ResultSpoolFn {
+	return func(res *sqltypes.Result, more bool) error {
+		// Apply all modifiers in sequence
+		result := res
+		for _, modifier := range modifiers {
+			result = modifier(result)
+		}
+		return callback(result, more)
+	}
+}
+
+func (h *MyHandler) ComMultiQuery(
+	ctx context.Context,
+	c *mysql.Conn,
+	query string,
+	callback mysql.ResultSpoolFn,
+) (string, error) {
+	var modifiers []ResultModifier
+	query, modifiers = applyRequestModifiers(query, defaultRequestModifiers)
+
+	return h.Handler.ComMultiQuery(ctx, c, query, wrapResultCallback(callback, modifiers...))
+}
+
 // Naive query rewriting. This is just a temporary solution
 // and should be replaced with a more robust implementation.
 func (h *MyHandler) ComQuery(
@@ -51,9 +72,10 @@ func (h *MyHandler) ComQuery(
 	query string,
 	callback mysql.ResultSpoolFn,
 ) error {
-	query = autoIncrementRegex.ReplaceAllString(query, "")
+	var modifiers []ResultModifier
+	query, modifiers = applyRequestModifiers(query, defaultRequestModifiers)
 
-	return h.Handler.ComQuery(ctx, c, query, callback)
+	return h.Handler.ComQuery(ctx, c, query, wrapResultCallback(callback, modifiers...))
 }
 
 func WrapHandler(pool *ConnectionPool) server.HandlerWrapper {
