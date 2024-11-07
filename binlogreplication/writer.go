@@ -3,7 +3,7 @@ package binlogreplication
 import (
 	stdsql "database/sql"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/delta"
 	"github.com/dolthub/go-mysql-server/sql"

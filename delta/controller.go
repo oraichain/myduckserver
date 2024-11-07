@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/apache/arrow/go/v17/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/catalog"

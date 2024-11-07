@@ -389,6 +389,15 @@ func TestQueriesSimple(t *testing.T) {
 		"select_length(random_bytes(i))_from_mytable;",
 	}
 
+	// Order undefined
+	undefinedOrderQueries := []string{
+		// partial order by, the order of remaining columns is undefined
+		"select_distinct_pk1_from_two_pk_order_by_pk2",
+		"select_distinct_pk2_from_two_pk_order_by_pk1",
+		"select_distinct_pk1,_pk2_from_two_pk_order_by_pk1",
+		"select_distinct_pk1,_pk2_from_two_pk_order_by_pk2",
+	}
+
 	// failed during CI
 	waitForFixQueries = append(waitForFixQueries,
 		"SELECT_TAN(i)_from_mytable_order_by_i_limit_1", // might be precision issue
@@ -401,6 +410,7 @@ func TestQueriesSimple(t *testing.T) {
 	}
 
 	harness.QueriesToSkip(notApplicableQueries...)
+	harness.QueriesToSkip(undefinedOrderQueries...)
 	harness.QueriesToSkip(waitForFixQueries...)
 	harness.QueriesToSkip(panicQueries...)
 	enginetest.TestQueries(t, harness)
@@ -804,10 +814,6 @@ func TestIndexQueryPlans(t *testing.T) {
 			enginetest.TestIndexQueryPlans(t, harness)
 		})
 	}
-}
-
-func TestParallelismQueries(t *testing.T) {
-	enginetest.TestParallelismQueries(t, NewDuckHarness("default", 2, testNumPartitions, true, nil))
 }
 
 func TestQueryErrors(t *testing.T) {

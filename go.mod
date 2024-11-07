@@ -4,30 +4,30 @@ go 1.23.2
 
 require (
 	github.com/Shopify/toxiproxy/v2 v2.9.0
-	github.com/apache/arrow/go/v17 v17.0.0
+	github.com/apache/arrow-go/v18 v18.0.0
 	github.com/cockroachdb/apd/v3 v3.2.1
 	github.com/cockroachdb/cockroachdb-parser v0.23.2
 	github.com/dolthub/doltgresql v0.13.0
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772
-	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241106010546-3281d09c1f15
+	github.com/dolthub/vitess v0.0.0-20241104125316-860772ba6683
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/jackc/pgx/v5 v5.7.1
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.10.9
-	github.com/marcboeker/go-duckdb v1.8.2-0.20241002112231-62d5fa8c0697
+	github.com/marcboeker/go-duckdb v1.8.3
 	github.com/prometheus/client_golang v1.20.3
 	github.com/rs/zerolog v1.33.0
 	github.com/shopspring/decimal v1.3.1
 	github.com/sirupsen/logrus v1.8.1
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/text v0.18.0
+	golang.org/x/text v0.19.0
 	gopkg.in/src-d/go-errors.v1 v1.0.0
 	vitess.io/vitess v0.21.0
 )
 
 replace (
-	github.com/dolthub/go-mysql-server v0.18.2-0.20241018220726-63ed221b1772 => github.com/fanyang01/go-mysql-server v0.0.0-20241021025444-83e2e88c99aa
-	github.com/dolthub/vitess v0.0.0-20241016191424-d14e107a654e => github.com/apecloud/dolt-vitess v0.0.0-20241028060845-4a2a0444a0ac
+	github.com/dolthub/go-mysql-server v0.18.2-0.20241106010546-3281d09c1f15 => github.com/fanyang01/go-mysql-server v0.0.0-20241107083514-e7c2ac20ddba
+	github.com/dolthub/vitess v0.0.0-20241104125316-860772ba6683 => github.com/apecloud/dolt-vitess v0.0.0-20241107081545-d894da3857d8
 )
 
 require (
@@ -62,7 +62,7 @@ require (
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/klauspost/compress v1.17.9 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.8 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -96,14 +96,14 @@ require (
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/mod v0.21.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
-	golang.org/x/tools v0.25.0 // indirect
+	golang.org/x/sys v0.26.0 // indirect
+	golang.org/x/tools v0.26.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/genproto v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/grpc v1.66.2 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/grpc v1.67.1 // indirect
+	google.golang.org/protobuf v1.35.1 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -59,7 +59,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
     else \
         ARCH="amd64"; \
     fi && \
-    curl -LJO https://github.com/duckdb/duckdb/releases/download/v1.0.0/duckdb_cli-linux-$ARCH.zip \
+    curl -LJO https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-$ARCH.zip \
     && unzip duckdb_cli-linux-$ARCH.zip \
     && chmod +x duckdb \
     && mv duckdb /usr/local/bin \

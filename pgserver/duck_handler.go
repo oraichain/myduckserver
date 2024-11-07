@@ -342,11 +342,11 @@ func (h *DuckHandler) executeQuery(ctx *sql.Context, query string, parsed tree.S
 // executeBoundPlan is a QueryExecutor that calls QueryWithBindings on the given engine using the given query and parsed
 // statement, which may be nil.
 func (h *DuckHandler) executeBoundPlan(ctx *sql.Context, query string, _ tree.Statement, plan sql.Node) (sql.Schema, sql.RowIter, *sql.QueryFlags, error) {
-	return h.e.PrepQueryPlanForExecution(ctx, query, plan)
+	return h.e.PrepQueryPlanForExecution(ctx, query, plan, nil)
 }
 
 func (h *DuckHandler) beginTransaction(ctx *sql.Context) error {
-	beginNewTransaction := ctx.GetTransaction() == nil || plan.ReadCommitted(ctx)
+	beginNewTransaction := ctx.GetTransaction() == nil
 	if beginNewTransaction {
 		ctx.GetLogger().Tracef("beginning new transaction")
 		ts, ok := ctx.Session.(sql.TransactionSession)

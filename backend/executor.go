@@ -61,18 +61,6 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 	}
 
 	n := root
-	qp, ok := n.(*plan.QueryProcess)
-	if ok {
-		n = qp.Child()
-	}
-	tc, ok := n.(*plan.TransactionCommittingNode)
-	if ok {
-		n = tc.Child()
-	}
-	rua, ok := n.(*plan.RowUpdateAccumulator)
-	if ok {
-		n = rua.Child()
-	}
 	ctx.GetLogger().WithFields(logrus.Fields{
 		"Query":    ctx.Query(),
 		"NodeType": fmt.Sprintf("%T", n),
@@ -125,6 +113,8 @@ func (b *DuckBuilder) Build(ctx *sql.Context, root sql.Node, r sql.Row) (sql.Row
 		return b.base.Build(ctx, root, r)
 	// SubqueryAlias is for select * from view
 	case *plan.ResolvedTable, *plan.SubqueryAlias, *plan.TableAlias:
+		return b.executeQuery(ctx, node, conn)
+	case *plan.Distinct, *plan.OrderedDistinct:
 		return b.executeQuery(ctx, node, conn)
 	case sql.Expressioner:
 		return b.executeExpressioner(ctx, node, conn)
