@@ -176,6 +176,7 @@ func TestAutoRestartReplica(t *testing.T) {
 	require.Equal(t, "", status["Last_SQL_Error"])
 	require.Equal(t, "Yes", status["Replica_IO_Running"])
 	require.Equal(t, "Yes", status["Replica_SQL_Running"])
+	require.Equal(t, "1", status["Source_Server_Id"])
 
 	// Stop replication and assert the replica-running marker file is removed
 	replicaDatabase.MustExec("stop replica")

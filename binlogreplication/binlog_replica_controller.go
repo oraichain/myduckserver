@@ -17,6 +17,7 @@ package binlogreplication
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -435,6 +436,13 @@ func (d *myBinlogReplicaController) setSqlError(errno sqlerror.ErrorCode, messag
 	d.status.LastSqlErrorTimestamp = &currentTime
 	d.status.LastSqlErrNumber = uint(errno)
 	d.status.LastSqlError = message
+}
+
+// setSourceServerID updates the current replication status with the specific |serverID| to identify the source server.
+func (d *myBinlogReplicaController) setSourceServerID(serverID uint32) {
+	d.statusMutex.Lock()
+	d.status.SourceServerId = strconv.Itoa(int(serverID))
+	d.statusMutex.Unlock()
 }
 
 // AutoStart starts up replication if replication was running before the server was shutdown. If

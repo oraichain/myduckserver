@@ -383,6 +383,9 @@ func recordReplicationError(ctx *sql.Context, err error) {
 func (a *binlogReplicaApplier) processBinlogEvent(ctx *sql.Context, engine *gms.Engine, event mysql.BinlogEvent) error {
 	var err error
 
+	// TODO(fan): detect server ID changes and reset the replication
+	MyBinlogReplicaController.setSourceServerID(event.ServerID())
+
 	// We don't support checksum validation, so we MUST strip off any checksum bytes if present, otherwise it gets
 	// interpreted as part of the payload and corrupts the data. Future checksum sizes, are not guaranteed to be the
 	// same size, so we can't strip the checksum until we've seen a valid Format binlog event that definitively
