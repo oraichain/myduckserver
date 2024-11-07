@@ -1,0 +1,17 @@
+name: Release Image
+
+on:
+  push:
+    branches:
+      - 'main'
+
+
+jobs:
+  release-image:
+    uses: apecloud/apecloud-cd/.github/workflows/release-image-cache.yml@v0.1.79
+    with:
+      IMG: "apecloud/myduckserver"
+      VERSION: "main"
+      GO_VERSION: "1.23"
+      DOCKERFILE_PATH: "./docker/Dockerfile"
+    secrets: inherit
