@@ -76,7 +76,7 @@ This setup exposes:
 Connect using any MySQL client to run MySQL-style SQL queries:
 
 ```bash
-mysql -h localhost -P 13306 -u root
+mysql -h127.0.0.1 -P13306 -uroot
 ```
 
 #### Connecting via PostgreSQL
@@ -84,7 +84,7 @@ mysql -h localhost -P 13306 -u root
 For full analytical power, connect using the PostgreSQL-compatible port and write DuckDB SQL directly:
 
 ```bash
-psql -h localhost -p 15432 -U mysql
+psql -h 127.0.0.1 -p 15432 -U mysql
 ```
 
 ### Replicating Data
