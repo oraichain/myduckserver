@@ -76,7 +76,7 @@ This setup exposes:
 Connect using any MySQL client to run MySQL-style SQL queries:
 
 ```bash
-mysql -h localhost -P 13306 -u root -p
+mysql -h localhost -P 13306 -u root
 ```
 
 #### Connecting via PostgreSQL
