@@ -21,14 +21,14 @@ mkdir -p maxscale
 # create file my-maxscale.cnf
 cat <<EOF > maxscale/my-maxscale.cnf
 # Define the primary server
-[server1]
+[mysql-primary]
 type=server
 address=${LOCAL_HOST}
 port=3306
 protocol=MariaDBBackend
 
 # Define the secondary server
-[server2]
+[myduck-server]
 type=server
 address=${LOCAL_HOST}
 port=3307
@@ -38,7 +38,7 @@ protocol=MariaDBBackend
 [MySQL-Monitor]
 type=monitor
 module=mariadbmon
-servers=server1,server2
+servers=mysql-primary,myduck-server
 user=root
 password=''
 monitor_interval=2000ms
@@ -48,7 +48,7 @@ assume_unique_hostnames=false
 [Read-Write-Service]
 type=service
 router=readwritesplit
-servers=server1,server2
+servers=mysql-primary,myduck-server
 user=root
 password=''
 filters=Hint

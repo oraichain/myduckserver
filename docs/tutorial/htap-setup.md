@@ -27,29 +27,28 @@ Just run `bash startup.sh`. Then you'll get a HTAP cluster. And an account 'lol'
 * The status of proxy `MaxScale` can be retrieved by the built-in tool [maxctrl](https://mariadb.com/kb/en/mariadb-maxscale-24-maxctrl/). e.g. You can get the status of the servers by `docker exec maxscale maxctrl list servers`
 ```bash
 % docker exec maxscale maxctrl list servers                                            
-┌─────────┬──────────────────────┬──────┬─────────────┬─────────────────┬──────┬───────────────┐
-│ Server  │ Address              │ Port │ Connections │ State           │ GTID │ Monitor       │
-├─────────┼──────────────────────┼──────┼─────────────┼─────────────────┼──────┼───────────────┤
-│ server1 │ host.docker.internal │ 3306 │ 0           │ Master, Running │      │ MySQL-Monitor │
-├─────────┼──────────────────────┼──────┼─────────────┼─────────────────┼──────┼───────────────┤
-│ server2 │ host.docker.internal │ 3307 │ 0           │ Slave, Running  │      │ MySQL-Monitor │
-└─────────┴──────────────────────┴──────┴─────────────┴─────────────────┴──────┴───────────────┘
+┌───────────────┬──────────────────────┬──────┬─────────────┬─────────────────┬──────┬───────────────┐
+│ Server        │ Address              │ Port │ Connections │ State           │ GTID │ Monitor       │
+├───────────────┼──────────────────────┼──────┼─────────────┼─────────────────┼──────┼───────────────┤
+│ mysql-primary │ host.docker.internal │ 3306 │ 0           │ Master, Running │      │ MySQL-Monitor │
+├───────────────┼──────────────────────┼──────┼─────────────┼─────────────────┼──────┼───────────────┤
+│ myduck-server │ host.docker.internal │ 3307 │ 0           │ Slave, Running  │      │ MySQL-Monitor │
+└───────────────┴──────────────────────┴──────┴─────────────┴─────────────────┴──────┴───────────────┘
 ```
 
-* After you connect to the HTAP service, any read statements will be sent to MyDuck Server. MyDuck Server will leverage the power of DuckDB to boost the analytical performance! you can execute `docker exec maxscale maxctrl show server server2 | grep count | grep -v '"count": 0,'` to get the counting of the requests have been sent to the replica. If you want to check the counting of the requests sent to primary node, please replace the `server2` with `server1` in the former command.
+* After you connect to the HTAP service, any read statements will be sent to MyDuck Server. MyDuck Server will leverage the power of DuckDB to boost the analytical performance! you can execute `docker exec maxscale maxctrl show server myduck-server | grep count | grep -v '"count": 0,'` to get the counting of the requests have been sent to the replica. If you want to check the counting of the requests sent to primary node, please replace the `myduck-server` with `mysql-primary` in the former command.
 
 For instance, before executing a `READ` statement on HTAP service:
 ```bash
-% docker exec maxscale maxctrl show server server2 | grep count | grep -v '"count": 0,'
-│                     │                     "count": 1,              │
-│                     │                     "count": 1,              │
+% docker exec maxscale maxctrl show server myduck-server | grep count | grep -v '"count": 0,'
+│                     │                     "count": 2,              │
 ```
 
 after executing the `READ` statement:
 ```bash
-% docker exec maxscale maxctrl show server server2 | grep count | grep -v '"count": 0,'
-│                     │                     "count": 1,              │
+% docker exec maxscale maxctrl show server myduck-server | grep count | grep -v '"count": 0,'
 │                     │                     "count": 2,              │
+│                     │                     "count": 1,              │
 ```
 
 # Cleanup

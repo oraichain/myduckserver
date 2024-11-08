@@ -9,10 +9,11 @@ docker-compose up -d
 # wait for MySQL to be ready
 echo "Waiting for MySQL to be ready..."
 while true; do
-  docker exec htap-mysql bash -c "mysql -h127.0.0.1 -P3306 -uroot -e 'select 1'"
+  docker exec htap-mysql bash -c "mysql -h127.0.0.1 -P3306 -uroot -e 'select 1'" 2> /dev/null
   if [[ $? -eq 0 ]]; then
     break
   fi
+  echo "MySQL is not ready, keep waiting..."
   sleep 1
 done
 
@@ -38,3 +39,5 @@ done
 # TODO(sean): This is a temporary workaround due to this bug: https://github.com/apecloud/myduckserver/issues/134
 # alter user on myduck
 docker exec htap-myduck bash -c "mysqlsh --sql --host=host.docker.internal --port=3307 --user=root --password='' -e \"alter user 'lol'@'%' identified by 'lol';\""
+
+echo -e "\n\n The HTAP cluster is ready, have fun!"
