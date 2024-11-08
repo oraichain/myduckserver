@@ -1,10 +1,10 @@
 # MyDuck Server
 
-**MyDuck Server** unlocks serious power for your MySQL analytics. Imagine the simplicity of MySQL’s familiar interface fused with the raw analytical speed of [DuckDB](https://duckdb.org/). Now you can supercharge your MySQL queries with DuckDB’s lightning-fast OLAP engine, all while using the tools and syntax you know.
+**MyDuck Server** unlocks serious power for your MySQL analytics. Imagine the simplicity of MySQL’s familiar interface fused with the raw analytical speed of [DuckDB](https://duckdb.org/). Now you can supercharge your MySQL queries with DuckDB’s lightning-fast OLAP engine, all while using the tools and dialect you know.
 
-## ❓ Why MyDuck Server?
+## ❓ Why MyDuck ❓
 
-While MySQL is a popular go-to choice for OLTP, its performance in analytics often largely lags. DuckDB, on the other hand, is built for fast, embedded analytical processing. **MyDuck Server** lets you enjoy DuckDB's high-speed analytics without leaving the MySQL ecosystem.
+While MySQL is a popular go-to choice for OLTP, its performance in analytics often largely lags. DuckDB, on the other hand, is built for fast, embedded analytical processing. MyDuck Server lets you enjoy DuckDB's high-speed analytics without leaving the MySQL ecosystem.
 
 With MyDuck Server, you can:
 
@@ -14,31 +14,39 @@ With MyDuck Server, you can:
 - **Run DuckDB in server mode** to share a DuckDB instance with your team or among your applications 🌩️
 - and much more! See below for a full list of feature highlights.
 
-MyDuck Server isn’t here to replace MySQL—it’s here to help MySQL users do more with their data. This open-source project gives you a convenient way to integrate high-speed analytics into your MySQL workflow, all while embracing the flexibility and efficiency of DuckDB.
+MyDuck Server isn’t here to replace MySQL — it’s here to help MySQL users do more with their data. This open-source project gives you a convenient way to integrate high-speed analytics into your MySQL workflow, all while embracing the flexibility and efficiency of DuckDB.
 
 ## ✨ Key Features
 
-- **Blazing Fast OLAP with DuckDB**: MyDuck stores data in DuckDB, an OLAP-optimized database known for lightning-fast analytical queries. With DuckDB, MyDuck performs complex queries up to 1000x faster than traditional MySQL setups, enabling complex analytics that were impractical with MySQL alone.
+- **Blazing Fast OLAP with DuckDB**: MyDuck stores data in DuckDB, an OLAP-optimized database known for lightning-fast analytical queries. With DuckDB, MyDuck executes queries up to 1000x faster than traditional MySQL setups, enabling complex analytics that were impractical with MySQL alone.
 
-- **MySQL-Compatible Interface**: MyDuck speaks MySQL wire protocol and understands MySQL syntax, so you can connect to it with any MySQL client and run MySQL-style SQL. MyDuck translates your MySQL queries on the fly and executes them in DuckDB. Connect your favorite data visualization tools, BI platforms, and reporting tools to MyDuck without any changes, and enjoy the speed boost.
+- **MySQL-Compatible Interface**: MyDuck speaks MySQL wire protocol and understands MySQL syntax, so you can connect to it with any MySQL client and run MySQL-style SQL. MyDuck translates your queries on the fly and executes them in DuckDB. Connect your favorite data visualization tools and BI platforms to MyDuck without any changes, and enjoy the speed boost.
 
 - **Zero-ETL**: Just `START REPLICA` and go! MyDuck replicates data from your primary MySQL server in real-time, so you can start querying immediately. There’s no need to set up complex ETL pipelines.
 
-- **Consistent and Efficient Replication**: Thanks to DuckDB's [solid ACID support](https://duckdb.org/2024/09/25/changing-data-with-confidence-and-acid.html), we’ve carefully managed transaction boundaries in the replication stream to ensure **consistent data view** — you’ll never see dirty data mid-transaction. Plus, MyDuck’s **transaction batching** collects updates from multiple transactions and applies them to DuckDB in batches, significantly reducing write overhead (since DuckDB isn’t designed for high-frequency OLTP writes).
+- **Consistent and Efficient Replication**: Thanks to DuckDB's [solid ACID support](https://duckdb.org/2024/09/25/changing-data-with-confidence-and-acid.html), we’ve carefully managed transaction boundaries in the replication stream to ensure a **consistent data view** — you’ll never see dirty data mid-transaction. Plus, MyDuck’s **transaction batching** collects updates from multiple transactions and applies them to DuckDB in batches, significantly reducing write overhead (since DuckDB isn’t designed for high-frequency OLTP writes).
 
 - **Raw DuckDB Power**: MyDuck also offers a Postgres-compatible port, allowing you to send DuckDB SQL directly. This opens up DuckDB’s full analytical capabilities, including [friendly SQL syntax](https://duckdb.org/docs/sql/dialect/friendly_sql.html), [advanced aggregates](https://duckdb.org/docs/sql/functions/aggregates), [accessing remote data sources](https://duckdb.org/docs/extensions/httpfs/s3api.html#reading), and more. 
 
-- **DuckDB in Server Mode**: If you aren't interested in MySQL but just want to share a DuckDB instance with your team, MyDuck is also a great solution. You can deploy MyDuck to a server, ignore all the MySQL stuff, and connect to it with any PostgreSQL client.
+- **DuckDB in Server Mode**: If you aren't interested in MySQL but just want to share a DuckDB instance with your team or among your applications, MyDuck is also a great solution. You can deploy MyDuck to a server, ignore all the MySQL configuration, and connect to it with any PostgreSQL client.
 
-- **Seamless Integration with MySQL Dump & Copy Tools**: MyDuck plays perfectly with modern MySQL tools, especially the [MySQL Shell](https://dev.mysql.com/doc/mysql-shell/en/), the official advanced MySQL client. You can load data into MyDuck in parallel from a MySQL Shell dump, and even leverage the Shell’s `copy-instance` utility to copy a consistent snapshot of your running MySQL server to MyDuck.
+- **Seamless Integration with MySQL Dump & Copy Tools**: MyDuck plays perfectly with modern MySQL tools, especially the [MySQL Shell](https://dev.mysql.com/doc/mysql-shell/en/), the official advanced MySQL client. You can load data into MyDuck in parallel from a MySQL Shell dump, or leverage the Shell’s `copy-instance` utility to copy a consistent snapshot of your running MySQL server to MyDuck.
 
 - **Bulk Data Loading**: MyDuck supports fast bulk data loading from the client side with the standard MySQL `LOAD DATA LOCAL INFILE` command or the  PostgreSQL `COPY FROM STDIN` command.
 
-- **Standalone Mode**: MyDuck can run in standalone mode, without MySQL replication. In this mode, it is a drop-in replacement for MySQL, but with a DuckDB heart. You can `CREATE TABLE`, transactionally `INSERT`, `UPDATE` and `DELETE` data, and run blazingly-fast `SELECT` queries.
+- **Standalone Mode**: MyDuck can run in standalone mode, without MySQL replication. In this mode, it is a drop-in replacement for MySQL, but with a DuckDB heart. You can `CREATE TABLE`, transactionally `INSERT`, `UPDATE`, and `DELETE` data, and run blazingly fast `SELECT` queries.
 
 ## 📊 Performance
 
-Typical OLAP queries can run **up to 1000x faster** with MyDuck Server compared to MySQL alone, especially on large datasets. Under the hood, it's just DuckDB doing what it does best: processing analytical queries at lightning speed. You are welcome to run your own benchmarks and prepare to be amazed! Alternatively, you can refer to well-known benchmarks like the [ClickBench](https://benchmark.clickhouse.com/) and [H2O.ai db-benchmark](https://duckdblabs.github.io/db-benchmark/) to see how DuckDB performs against other databases and data science tools. Also remember that DuckDB has solid support for JOINs and [larger-than-memory query processing](https://duckdb.org/2024/07/09/memory-management.html), which are not available in many competing systems/tools.
+Typical OLAP queries can run **up to 1000x faster** with MyDuck Server compared to MySQL alone, especially on large datasets. Under the hood, it's just DuckDB doing what it does best: processing analytical queries at lightning speed. You are welcome to run your own benchmarks and prepare to be amazed! Alternatively, you can refer to well-known benchmarks like the [ClickBench](https://benchmark.clickhouse.com/) and [H2O.ai db-benchmark](https://duckdblabs.github.io/db-benchmark/) to see how DuckDB performs against other databases and data science tools. Also remember that DuckDB has robust support for transactions, JOINs, and [larger-than-memory query processing](https://duckdb.org/2024/07/09/memory-management.html), which are unavailable in many competing systems and tools.
+
+## 🎯 Roadmap
+
+We have big plans for MyDuck Server! Here are some of the features we’re working on:
+
+- [ ] Be compatible with MySQL proxy tools like [ProxySQL](https://proxysql.com/) and [MariaDB MaxScale](https://mariadb.com/kb/en/maxscale/).
+- [ ] Replicate data from PostgreSQL.
+- [ ] ...and more! We’re always looking for ways to make MyDuck Server better. If you have a feature request, please let us know by [opening an issue](https://github.com/apecloud/myduckserver/issues/new).
 
 
 ## 🏃‍♂️ Getting Started
@@ -53,7 +61,7 @@ Typical OLAP queries can run **up to 1000x faster** with MyDuck Server compared 
 Get a standalone MyDuck Server up and running in minutes using Docker:
 
 ```bash
-docker run -p 13306:3306 -p 15432:5432 apecloud/myduckserver
+docker run -p 13306:3306 -p 15432:5432 apecloud/myduckserver:latest
 ```
 
 This setup exposes:
@@ -76,23 +84,19 @@ mysql -h localhost -P 13306 -u root -p
 For full analytical power, connect using the PostgreSQL-compatible port and write DuckDB SQL directly:
 
 ```bash
-psql -h localhost -p 15432 -U postgres
+psql -h localhost -p 15432 -U mysql
 ```
 
 ### Replicating Data
 
-We have integrated in the Docker image an setup tool that help replicate data from your MySQL server to MyDuck Server. You can run the tool in standalone mode or combined with MyDuck Server. The tool is available via the `SETUP_MODE` environment variable.
-
-### REPLICA_ONLY
-
-In `REPLICA_ONLY` mode, only the replica setup tool runs. The container will exit after the setup completes.
+We have integrated a setup tool in the Docker image that helps replicate data from your primary MySQL server to MyDuck Server. The tool is available via the `SETUP_MODE` environment variable. In `REPLICA` mode, the container will start MyDuck Server, dump a snapshot of your primary MySQL server, and start replicating data in real-time.
 
 ```bash
 docker run \
   --network=host \
   --privileged \
   --workdir=/home/admin \
-  --env=SETUP_MODE=REPLICA_ONLY \
+  --env=SETUP_MODE=REPLICA \
   --env=MYSQL_HOST=<mysql_host> \
   --env=MYSQL_PORT=<mysql_port> \
   --env=MYSQL_USER=<mysql_user> \
@@ -100,26 +104,9 @@ docker run \
   --detach=true \
   apecloud/myduckserver:latest
 ```
+## Connecting to Cloud MySQL
 
-### COMBINED
-
-In `COMBINED` mode, MyDuckServer starts first, followed by the replica setup tool.
-
-```bash
-docker run \
-  --network=host \
-  --privileged \
-  --workdir=/home/admin \
-  --env=SETUP_MODE=COMBINED \
-  --env=MYSQL_HOST=<mysql_host> \
-  --env=MYSQL_PORT=<mysql_port> \
-  --env=MYSQL_USER=<mysql_user> \
-  --env=MYSQL_PASSWORD=<mysql_password> \
-  --detach=true \
-  apecloud/myduckserver:latest
-```
-## Connect to Cloud MySQL
-MyDuckServer supports setting up replicas from various MySQL-based database, you can see it on [replica-setup-rds.md](docs/tutorial/replica-setup-rds.md).
+MyDuck Server supports setting up replicas from common cloud-based MySQL offerings. For more information, please refer to the [replica setup guide](docs/tutorial/replica-setup-rds.md).
 
 ## 💡 Contributing
 
@@ -138,4 +125,4 @@ We are grateful to the developers and contributors of these projects for their h
 
 ## 📝 License
 
-MyDuckServer is released under the [Apache License 2.0](LICENSE). 
+MyDuck Server is released under the [Apache License 2.0](LICENSE).
