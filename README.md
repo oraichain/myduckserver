@@ -1,5 +1,5 @@
-<h1 align="center">
-    <img style="vertical-align:middle" width="70" alt="duck under dolphin" src="logo/myduck-logo.png">
+<h1 style="display: flex; align-items: center;">
+    <img width="60" alt="duck under dolphin" style="margin-right: 6px" src="logo/myduck-logo.png">
     <span>MyDuck Server</span>
 </h1>
 
