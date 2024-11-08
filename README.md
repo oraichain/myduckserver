@@ -1,5 +1,5 @@
 <h1 style="display: flex; align-items: center;">
-    <img width="60" alt="duck under dolphin" style="margin-right: 6px" src="logo/myduck-logo.png">
+    <img width="50" alt="duck under dolphin" style="margin-right: 0.2em" src="logo/myduck-logo.png">
     <span>MyDuck Server</span>
 </h1>
 
@@ -80,7 +80,7 @@ This setup exposes:
 Connect using any MySQL client to run MySQL-style SQL queries:
 
 ```bash
-mysql -h localhost -P 13306 -u root -p
+mysql -h127.0.0.1 -P13306 -uroot
 ```
 
 #### Connecting via PostgreSQL
@@ -88,7 +88,7 @@ mysql -h localhost -P 13306 -u root -p
 For full analytical power, connect using the PostgreSQL-compatible port and write DuckDB SQL directly:
 
 ```bash
-psql -h localhost -p 15432 -U mysql
+psql -h 127.0.0.1 -p 15432 -U mysql
 ```
 
 ### Replicating Data
@@ -124,6 +124,7 @@ MyDuck Server is built on top of the a collection of amazing open-source project
 - [DuckDB](https://duckdb.org/) - The fast in-process analytical database that powers MyDuck Server.
 - [go-mysql-server](https://github.com/dolthub/go-mysql-server) - The excellent MySQL server implementation in Go maintained by [DoltHub](https://www.dolthub.com/team) that MyDuck Server is based on.
 - [Vitess](https://vitess.io/) - Provides the MySQL replication stream subscriber used in MyDuck Server.
+- [SQLGlot](https://github.com/tobymao/sqlglot) - The ultimate SQL transpiler.
 
 We are grateful to the developers and contributors of these projects for their hard work and dedication to open-source software.
 
