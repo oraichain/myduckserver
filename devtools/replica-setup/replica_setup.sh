@@ -2,11 +2,16 @@
 
 # Function to display usage
 usage() {
-    echo "Usage: $0 --mysql_host <host> --mysql_port <port> --mysql_user <user> --mysql_password <password>"
+    echo "Usage: $0 --mysql_host <host> --mysql_port <port> --mysql_user <user> --mysql_password <password> [--myduck_host <host>] [--myduck_port <port>] [--myduck_user <user>] [--myduck_password <password>] [--myduck_in_docker <true|false>]"
     exit 1
 }
 
-# Parse input parameters using a more efficient approach
+MYDUCK_HOST="127.0.0.1"
+MYDUCK_PORT=3306
+MYDUCK_USER="_replicator_"
+MYDUCK_PASSWORD="_replicator_"
+MYDUCK_IN_DOCKER="false"
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --mysql_host)
@@ -25,6 +30,26 @@ while [[ $# -gt 0 ]]; do
             MYSQL_PASSWORD="$2"
             shift 2
             ;;
+        --myduck_host)
+            MYDUCK_HOST="$2"
+            shift 2
+            ;;
+        --myduck_port)
+            MYDUCK_PORT="$2"
+            shift 2
+            ;;
+        --myduck_user)
+            MYDUCK_USER="$2"
+            shift 2
+            ;;
+        --myduck_password)
+            MYDUCK_PASSWORD="$2"
+            shift 2
+            ;;
+        --myduck_in_docker)
+            MYDUCK_IN_DOCKER="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown parameter: $1"
             usage
@@ -35,7 +60,7 @@ done
 source checker.sh
 
 # Check if all parameters are set
-if [[ -z "$MYSQL_HOST" || -z "$MYSQL_PORT" || -z "$MYSQL_USER" || -z "$MYSQL_PASSWORD" ]]; then
+if [[ -z "$MYSQL_HOST" || -z "$MYSQL_PORT" || -z "$MYSQL_USER" ]]; then
     echo "Error: All parameters are required."
     usage
 fi
@@ -49,9 +74,9 @@ else
     echo "mysqlsh is already installed."
 fi
 
-# Step 2: Check if Replica of MyDuckServer has already been started
-echo "Checking if replica of MyDuckServer has already been started..."
-check_if_myduckserver_already_have_replica
+# Step 2: Check if Replica of MyDuck Server has already been started
+echo "Checking if replica of MyDuck Server has already been started..."
+check_if_myduck_has_replica
 if [[ $? -ne 0 ]]; then
     echo "Replica has already been started. Exiting."
     exit 1
