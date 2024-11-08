@@ -120,6 +120,7 @@ MyDuck Server is built on top of the a collection of amazing open-source project
 - [DuckDB](https://duckdb.org/) - The fast in-process analytical database that powers MyDuck Server.
 - [go-mysql-server](https://github.com/dolthub/go-mysql-server) - The excellent MySQL server implementation in Go maintained by [DoltHub](https://www.dolthub.com/team) that MyDuck Server is based on.
 - [Vitess](https://vitess.io/) - Provides the MySQL replication stream subscriber used in MyDuck Server.
+- [SQLGlot](https://github.com/tobymao/sqlglot) - The ultimate SQL transpiler.
 
 We are grateful to the developers and contributors of these projects for their hard work and dedication to open-source software.
 
