@@ -45,7 +45,7 @@ docker run \
   --network=host \
   --privileged \
   --workdir=/home/admin \
-  --env=SETUP_MODE=COMBINED \
+  --env=SETUP_MODE=REPLICA \
   --env=MYSQL_HOST=<mysql_host> \
   --env=MYSQL_PORT=<mysql_port> \
   --env=MYSQL_USER=<mysql_user> \
