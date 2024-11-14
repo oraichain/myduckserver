@@ -123,6 +123,14 @@ MyDuck Server supports setting up replicas from common cloud-based MySQL offerin
 
 With MyDuck's powerful analytics capabilities, you can create an HTAP (Hybrid Transactional/Analytical Processing) system where high-frequency data writes are directed to a standard MySQL instance, while analytical queries are handled by a MyDuck Server instance. Follow our HTAP setup instructions based on [ProxySQL](docs/tutorial/htap-proxysql-setup.md) or [MariaDB MaxScale](docs/tutorial/htap-maxscale-setup.md) to easily set up an HTAP demonstration.
 
+### Query & Load Parquet Files
+
+Looking to load Parquet files into MyDuck Server and start querying? Follow our [Parquet file loading guide](docs/tutorial/load-parquet-files.md) for easy setup.
+
+### Already Using DuckDB?
+
+Already have a DuckDB file? You can seamlessly bootstrap MyDuck Server with it. See our [DuckDB file bootstrapping guide](docs/tutorial/bootstrap.md) for more details.
+
 ## 💡 Contributing
 
 Let’s make MySQL analytics fast and powerful—together!
