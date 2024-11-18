@@ -24,6 +24,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime/debug"
 	"strings"
 	"unicode"
 
@@ -106,7 +107,7 @@ func (h *ConnectionHandler) HandleConnection() {
 	if HandlePanics {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Listener recovered panic: %v", r)
+				fmt.Printf("Listener recovered panic: %v\n%s\n", r, string(debug.Stack()))
 
 				var eomErr error
 				if returnErr != nil {
@@ -120,7 +121,7 @@ func (h *ConnectionHandler) HandleConnection() {
 				// Sending eom can panic, which means we must recover again
 				defer func() {
 					if r := recover(); r != nil {
-						fmt.Printf("Listener recovered panic: %v", r)
+						fmt.Printf("Listener recovered panic: %v\n%s\n", r, string(debug.Stack()))
 					}
 				}()
 				h.endOfMessages(eomErr)
@@ -288,7 +289,7 @@ func (h *ConnectionHandler) receiveMessage() (bool, error) {
 	if HandlePanics {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Listener recovered panic: %v", r)
+				fmt.Printf("Listener recovered panic: %v\n%s\n", r, string(debug.Stack()))
 
 				var eomErr error
 				if rErr, ok := r.(error); ok {
@@ -553,6 +554,7 @@ func (h *ConnectionHandler) handleBind(message *pgproto3.Bind) error {
 		Query:  preparedData.Query,
 		Fields: fields,
 		Stmt:   preparedData.Stmt,
+		Vars:   bindVars,
 	}
 	return h.send(&pgproto3.BindComplete{})
 }
@@ -668,7 +670,7 @@ func (h *ConnectionHandler) handleCopyDataHelper(message *pgproto3.CopyData) (st
 			}
 			fallthrough
 		case tree.CopyFormatCSV:
-			dataLoader, err = NewCsvDataLoader(sqlCtx, h.duckHandler, &schemaName, insertableTable, copyFrom.Columns, &copyFrom.Options)
+			dataLoader, err = NewCsvDataLoader(sqlCtx, h.duckHandler, schemaName, insertableTable, copyFrom.Columns, &copyFrom.Options)
 		case tree.CopyFormatBinary:
 			err = fmt.Errorf("BINARY format is not supported for COPY FROM")
 		default:
@@ -787,11 +789,11 @@ func (h *ConnectionHandler) deletePortal(name string) {
 }
 
 // convertBindParameters handles the conversion from bind parameters to variable values.
-func (h *ConnectionHandler) convertBindParameters(types []uint32, formatCodes []int16, values [][]byte) ([]string, error) {
+func (h *ConnectionHandler) convertBindParameters(types []uint32, formatCodes []int16, values [][]byte) ([]any, error) {
 	if len(types) != len(values) {
 		return nil, fmt.Errorf("number of values does not match number of parameters")
 	}
-	bindings := make([]string, len(values))
+	bindings := make([]pgtype.Text, len(values))
 	for i := range values {
 		typ := types[i]
 		// We'll rely on a library to decode each format, which will deal with text and binary representations for us
@@ -799,7 +801,12 @@ func (h *ConnectionHandler) convertBindParameters(types []uint32, formatCodes []
 			return nil, err
 		}
 	}
-	return bindings, nil
+
+	vars := make([]any, len(bindings))
+	for i, b := range bindings {
+		vars[i] = b.String
+	}
+	return vars, nil
 }
 
 // query runs the given query and sends a CommandComplete message to the client

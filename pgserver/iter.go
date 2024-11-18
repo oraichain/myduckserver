@@ -31,7 +31,7 @@ func NewDriverRowIter(rows driver.Rows, schema sql.Schema) (*DriverRowIter, erro
 		}
 		sb.WriteString(col.Type.String())
 	}
-	logrus.Debugf("New DriverRowIter: columns=%v, schema=[%s]", columns, sb.String())
+	logrus.Debugf("New DriverRowIter: columns=%v, schema=[%s]\n", columns, sb.String())
 
 	return &DriverRowIter{rows, columns, schema, buf, row}, nil
 }

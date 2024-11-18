@@ -504,7 +504,7 @@ var replicationTests = []ReplicationTest{
 }
 
 func TestReplication(t *testing.T) {
-	// logrus.SetLevel(logrus.TraceLevel)
+	// logrus.SetLevel(logrus.DebugLevel)
 	RunReplicationScripts(t, replicationTests)
 }
 
@@ -545,7 +545,7 @@ func RunReplicationScripts(t *testing.T, scripts []ReplicationTest) {
 	time.Sleep(500 * time.Millisecond)
 
 	// for i, script := range scripts {
-	// 	if i == 4 {
+	// 	if i == 0 {
 	// 		RunReplicationScript(t, dsn, script)
 	// 	}
 	// }
@@ -555,7 +555,6 @@ func RunReplicationScripts(t *testing.T, scripts []ReplicationTest) {
 }
 
 const slotName = "myduck_slot"
-const localPostgresPort = 5432
 
 // RunReplicationScript runs the given ReplicationTest.
 func RunReplicationScript(t *testing.T, dsn string, script ReplicationTest) {

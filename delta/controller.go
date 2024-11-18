@@ -11,7 +11,6 @@ import (
 	"unsafe"
 
 	"github.com/apache/arrow-go/v18/arrow/ipc"
-	"github.com/apecloud/myduckserver/backend"
 	"github.com/apecloud/myduckserver/binlog"
 	"github.com/apecloud/myduckserver/catalog"
 	"github.com/dolthub/go-mysql-server/sql"
@@ -28,12 +27,10 @@ type FlushStats struct {
 type DeltaController struct {
 	mutex  sync.Mutex
 	tables map[tableIdentifier]*DeltaAppender
-	pool   *backend.ConnectionPool
 }
 
-func NewController(pool *backend.ConnectionPool) *DeltaController {
+func NewController() *DeltaController {
 	return &DeltaController{
-		pool:   pool,
 		tables: make(map[tableIdentifier]*DeltaAppender),
 	}
 }
@@ -142,6 +139,10 @@ func (c *DeltaController) updateTable(
 	buf *bytes.Buffer,
 	stats *FlushStats,
 ) error {
+	if tx == nil {
+		return fmt.Errorf("no active transaction")
+	}
+
 	buf.Reset()
 
 	schema := appender.BaseSchema() // schema of the base table
@@ -283,6 +284,25 @@ func (c *DeltaController) updateTable(
 		return err
 	}
 	stats.Deletions += affected
+
+	// For debugging:
+	//
+	// rows, err := tx.QueryContext(ctx, "SELECT * FROM "+qualifiedTableName)
+	// if err != nil {
+	// 	return err
+	// }
+	// defer rows.Close()
+	// row := make([]any, len(schema))
+	// pointers := make([]any, len(row))
+	// for i := range row {
+	// 	pointers[i] = &row[i]
+	// }
+	// for rows.Next() {
+	// 	if err := rows.Scan(pointers...); err != nil {
+	// 		return err
+	// 	}
+	// 	fmt.Printf("row:%+v\n", row)
+	// }
 
 	if log := ctx.GetLogger(); log.Logger.IsLevelEnabled(logrus.TraceLevel) {
 		log.WithFields(logrus.Fields{
