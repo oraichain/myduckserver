@@ -30,6 +30,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/apecloud/myduckserver/adapter"
 	"github.com/apecloud/myduckserver/catalog"
@@ -38,7 +39,6 @@ import (
 	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
 	gms "github.com/dolthub/go-mysql-server"
 	"github.com/dolthub/go-mysql-server/server"
-	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/vitess/go/mysql"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -341,7 +341,7 @@ func (h *ConnectionHandler) receiveMessage() (bool, error) {
 	if HandlePanics {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Listener recovered panic: %v\n%s\n", r, string(debug.Stack()))
+				h.logger.Debugf("Listener recovered panic: %v\n%s\n", r, string(debug.Stack()))
 
 				var eomErr error
 				if rErr, ok := r.(error); ok {
@@ -352,7 +352,7 @@ func (h *ConnectionHandler) receiveMessage() (bool, error) {
 
 				if !endOfMessages && h.waitForSync {
 					if syncErr := h.discardToSync(); syncErr != nil {
-						fmt.Println(syncErr.Error())
+						h.logger.Error(syncErr.Error())
 					}
 				}
 				h.endOfMessages(eomErr)
@@ -601,6 +601,8 @@ func (h *ConnectionHandler) handleQueryOutsideEngine(query ConvertedQuery) (hand
 		if stmt.Stdin {
 			return true, false, h.handleCopyFromStdinQuery(query, stmt, h.Conn())
 		}
+	case *tree.CopyTo:
+		return true, true, h.handleCopyToStdout(query, stmt)
 	}
 	return false, true, nil
 }
@@ -815,25 +817,13 @@ func (h *ConnectionHandler) handleCopyDataHelper(message *pgproto3.CopyData) (st
 		if copyFrom == nil {
 			return false, false, fmt.Errorf("no COPY FROM STDIN node found")
 		}
-
-		// TODO: It would be better to get the table from the copyFromStdinNode – not by calling core.GetSqlTableFromContext
-		schemaName := copyFrom.Table.Schema()
-		tableName := copyFrom.Table.Table()
-		table, err := GetSqlTableFromContext(sqlCtx, schemaName, tableName)
-		if err != nil {
-			return false, true, err
-		}
+		table := h.copyFromStdinState.targetTable
 		if table == nil {
-			return false, true, fmt.Errorf(`relation "%s" does not exist`, tableName)
-		}
-		insertableTable, ok := table.(sql.InsertableTable)
-		if !ok {
-			return false, true, fmt.Errorf(`table "%s" is read-only`, tableName)
+			return false, true, fmt.Errorf("no target table found")
 		}
 
 		switch copyFrom.Options.CopyFormat {
 		case tree.CopyFormatText:
-			copyFrom.Options.Delimiter = tree.NewStrVal("\t")
 			// Remove trailing backslash, comma and newline characters from the data
 			if bytes.HasSuffix(message.Data, []byte{'\n'}) {
 				message.Data = message.Data[:len(message.Data)-1]
@@ -846,12 +836,15 @@ func (h *ConnectionHandler) handleCopyDataHelper(message *pgproto3.CopyData) (st
 			}
 			fallthrough
 		case tree.CopyFormatCSV:
-			dataLoader, err = NewCsvDataLoader(sqlCtx, h.duckHandler, schemaName, insertableTable, copyFrom.Columns, &copyFrom.Options)
+			dataLoader, err = NewCsvDataLoader(
+				sqlCtx, h.duckHandler,
+				copyFrom.Table.Schema(), table, copyFrom.Columns,
+				&copyFrom.Options,
+			)
 		case tree.CopyFormatBinary:
 			err = fmt.Errorf("BINARY format is not supported for COPY FROM")
 		default:
-			err = fmt.Errorf("unknown format specified for COPY FROM: %v",
-				copyFrom.Options.CopyFormat)
+			err = fmt.Errorf("unknown format specified for COPY FROM: %v", copyFrom.Options.CopyFormat)
 		}
 
 		if err != nil {
@@ -1254,12 +1247,14 @@ func (h *ConnectionHandler) handleCopyFromStdinQuery(query ConvertedQuery, copyF
 	}
 	sqlCtx.SetLogger(sqlCtx.GetLogger().WithField("query", query.String))
 
-	if err := ValidateCopyFrom(copyFrom, sqlCtx); err != nil {
+	table, err := ValidateCopyFrom(copyFrom, sqlCtx)
+	if err != nil {
 		return err
 	}
 
 	h.copyFromStdinState = &copyFromStdinState{
 		copyFromStdinNode: copyFrom,
+		targetTable:       table,
 	}
 
 	return h.send(&pgproto3.CopyInResponse{
@@ -1295,5 +1290,127 @@ func returnsRow(tag string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (h *ConnectionHandler) handleCopyToStdout(query ConvertedQuery, copyTo *tree.CopyTo) error {
+	ctx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, query.String)
+	if err != nil {
+		return err
+	}
+	ctx.SetLogger(ctx.GetLogger().WithField("query", query.String))
+
+	// Create cancelable context
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ctx = ctx.WithContext(childCtx)
+
+	table, err := ValidateCopyTo(copyTo, ctx)
+	if err != nil {
+		return err
+	}
+
+	var stmt string
+	if copyTo.Statement != nil {
+		stmt = copyTo.Statement.String()
+	}
+	writer, err := NewDataWriter(
+		ctx, h.duckHandler,
+		copyTo.Table.Schema(), table, copyTo.Columns,
+		stmt,
+		&copyTo.Options,
+	)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	// Send CopyOutResponse to the client
+	ctx.GetLogger().Debug("sending CopyOutResponse to the client")
+	copyOutResponse := &pgproto3.CopyOutResponse{
+		OverallFormat:     0,           // 0 for text format
+		ColumnFormatCodes: []uint16{0}, // 0 for text format
+	}
+	if err := h.send(copyOutResponse); err != nil {
+		return err
+	}
+
+	pipePath, ch, err := writer.Start()
+	if err != nil {
+		return err
+	}
+
+	done := make(chan struct{})
+	var sendErr atomic.Value
+	go func() {
+		defer close(done)
+
+		// Open the pipe for reading.
+		ctx.GetLogger().Tracef("Opening FIFO pipe for reading: %s", pipePath)
+		pipe, err := os.OpenFile(pipePath, os.O_RDONLY, os.ModeNamedPipe)
+		if err != nil {
+			sendErr.Store(fmt.Errorf("failed to open pipe for reading: %w", err))
+			cancel()
+			return
+		}
+		defer pipe.Close()
+
+		ctx.GetLogger().Debug("Copying data from the pipe to the client")
+		defer func() {
+			ctx.GetLogger().Debug("Finished copying data from the pipe to the client")
+		}()
+
+		buf := make([]byte, 1<<20) // 1MB buffer
+		for {
+			n, err := pipe.Read(buf)
+			if n > 0 {
+				copyData := &pgproto3.CopyData{
+					Data: buf[:n],
+				}
+				ctx.GetLogger().Debugf("sending CopyData (%d bytes) to the client", n)
+				if err := h.send(copyData); err != nil {
+					sendErr.Store(err)
+					cancel()
+					return
+				}
+			}
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				sendErr.Store(err)
+				cancel()
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done(): // Context is canceled
+		<-done
+		err, _ := sendErr.Load().(error)
+		return errors.Join(ctx.Err(), err)
+	case result := <-ch:
+		<-done
+
+		if result.Err != nil {
+			return fmt.Errorf("failed to copy data: %w", result.Err)
+		}
+
+		if err, ok := sendErr.Load().(error); ok {
+			return err
+		}
+
+		// After data is sent and the producer side is finished without errors, send CopyDone
+		ctx.GetLogger().Debug("sending CopyDone to the client")
+		if err := h.send(&pgproto3.CopyDone{}); err != nil {
+			return err
+		}
+
+		// Send CommandComplete with the number of rows copied
+		ctx.GetLogger().Debugf("sending CommandComplete to the client")
+		return h.send(&pgproto3.CommandComplete{
+			CommandTag: []byte(fmt.Sprintf("COPY %d", result.RowCount)),
+		})
 	}
 }
