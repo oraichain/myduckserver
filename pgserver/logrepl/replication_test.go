@@ -482,20 +482,102 @@ var replicationTests = []ReplicationTest{
 			createReplicationSlot,
 			startReplication,
 			"/* replica */ drop table if exists public.test",
-			"/* replica */ create table public.test (id INT primary key, name varchar(100), age INT, is_cool BOOLEAN, height FLOAT, birth_date DATE, birth_timestamp TIMESTAMP, income DECIMAL(10,2))",
+			"/* replica */ create table public.test (id INT primary key, " +
+				"name varchar(100), " +
+				"age SMALLINT, " +
+				"is_cool BOOLEAN, " +
+				"height FLOAT, " +
+				"birth_date DATE, " +
+				"birth_time TIME, " +
+				// TIMETZ is discouraged:
+				// https://www.postgresql.org/docs/current/datatype-datetime.html
+				// https://github.com/jackc/pgx/issues/1940
+				// "birth_timetz TIME WITH TIME ZONE, " +
+				"birth_timestamp TIMESTAMP, " +
+				"birth_timestamptz TIMESTAMP WITH TIME ZONE, " +
+				"income NUMERIC(10,2), " +
+				"binary_data BYTEA, " +
+				"description TEXT, " +
+				"code CHAR(3), " +
+				// "tags TEXT[], " +
+				// "scores INTEGER[], " +
+				// "real_nums REAL[], " +
+				"small_num SMALLINT, " +
+				"big_num BIGINT, " +
+				"json_data JSON)",
 			"drop table if exists public.test",
-			"create table public.test (id INT primary key, name varchar(100), age INT, is_cool BOOLEAN, height FLOAT, birth_date DATE, birth_timestamp TIMESTAMP, income DECIMAL(10,2))",
-			"INSERT INTO public.test VALUES (1, 'one', 1, true, 1.1, '2021-01-01', '2021-01-01 12:00:00', 12345678.9)",
-			"INSERT INTO public.test VALUES (2, 'two', 2, false, 2.2, '2021-02-02', '2021-02-02 13:00:00', 98765432.1)",
+			"create table public.test (id INT primary key, " +
+				"name varchar(100), " +
+				"age SMALLINT, " +
+				"is_cool BOOLEAN, " +
+				"height FLOAT, " +
+				"birth_date DATE, " +
+				"birth_time TIME, " +
+				// "birth_timetz TIME WITH TIME ZONE, " +
+				"birth_timestamp TIMESTAMP, " +
+				"birth_timestamptz TIMESTAMP WITH TIME ZONE, " +
+				"income DECIMAL(10,2), " +
+				"binary_data BYTEA, " +
+				"description TEXT, " +
+				"code CHAR(3), " +
+				// "tags TEXT[], " +
+				// "scores INTEGER[], " +
+				// "real_nums REAL[], " +
+				"small_num SMALLINT, " +
+				"big_num BIGINT, " +
+				"json_data JSONB)",
+			"INSERT INTO public.test VALUES (1, " +
+				"'one', 1, true, 1.1, " +
+				"'2021-01-01', '12:00:00', '2021-01-01 12:00:00', '2021-01-01 20:00:00+8', " +
+				"12345678.9, " +
+				`'\x0123456789ABCDEF', 'long text description', 'ABC', ` +
+				// "ARRAY['tag1', 'tag2'], ARRAY[1, 2, 3], ARRAY[1.1, 2.2, 3.3]::real[], " +
+				`123, 9223372036854775807, '{"key": "value"}')`,
+			"INSERT INTO public.test VALUES (2, " +
+				"'two', 2, false, 2.2, " +
+				"'2021-02-02', '13:00:00.123456', '2021-02-02 13:00:00.123456', '2021-02-02 05:00:00.123456-8', " +
+				"98765432.1, " +
+				`'\xDEADBEEF', 'another description', 'XYZ', ` +
+				// "ARRAY['tag3', 'tag4'], ARRAY[4, 5, 6], ARRAY[4.4, 5.5, 6.6]::real[], " +
+				`-123, -9223372036854775808, '{"array": [1, 2, 3]}')`,
 			"UPDATE public.test SET name = 'three' WHERE id = 2",
-			"DELETE FROM public.test WHERE id = 1",
+			`UPDATE public.test SET json_data = jsonb_set(json_data, '{key}', '"new_value"') WHERE id = 1`,
 			waitForCatchup,
 		},
 		Assertions: []ScriptTestAssertion{
 			{
-				Query: "/* replica */ SELECT * FROM public.test order by id",
+				Query: "/* replica */ SELECT * EXCLUDE (birth_timestamptz), birth_timestamptz AT TIME ZONE 'UTC' FROM public.test order by id",
 				Expected: []sql.Row{
-					{int32(2), "three", int32(2), false, float32(2.2), "2021-02-02", "2021-02-02 13:00:00", pgtest.Numeric("98765432.1")},
+					{int32(1), "one", int16(1), true, float32(1.1),
+						"2021-01-01", "12:00:00.000000",
+						// "12:00:00+00",
+						"2021-01-01 12:00:00",
+						pgtest.Numeric("12345678.9"),
+						[]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF},
+						"long text description", "ABC",
+						// []string{"tag1", "tag2"},
+						// []int32{1, 2, 3},
+						// []float32{1.1, 2.2, 3.3},
+						int16(123),
+						int64(9223372036854775807),
+						`{"key": "new_value"}`,
+						"2021-01-01 12:00:00",
+					},
+					{int32(2), "three", int16(2), false, float32(2.2),
+						"2021-02-02", "13:00:00.123456",
+						// "13:00:00.123456+00",
+						"2021-02-02 13:00:00.123456",
+						pgtest.Numeric("98765432.1"),
+						[]byte{0xDE, 0xAD, 0xBE, 0xEF},
+						"another description", "XYZ",
+						// []string{"tag3", "tag4"},
+						// []int32{4, 5, 6},
+						// []float32{4.4, 5.5, 6.6},
+						int16(-123),
+						int64(-9223372036854775808),
+						`{"array": [1, 2, 3]}`,
+						"2021-02-02 13:00:00.123456",
+					},
 				},
 			},
 		},
