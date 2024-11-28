@@ -1047,10 +1047,12 @@ func (h *ConnectionHandler) query(query ConvertedQuery) error {
 		query.StatementTag = tag
 	}
 
-	callback := h.spoolRowsCallback(query.StatementTag, &rowsAffected, false)
 	if query.SubscriptionConfig != nil {
-		return executeCreateSubscriptionSQL(h, query.SubscriptionConfig)
-	} else if err := h.duckHandler.ComQuery(
+		return h.executeCreateSubscriptionSQL(query.SubscriptionConfig)
+	}
+
+	callback := h.spoolRowsCallback(query.StatementTag, &rowsAffected, false)
+	if err := h.duckHandler.ComQuery(
 		context.Background(),
 		h.mysqlConn,
 		query.String,

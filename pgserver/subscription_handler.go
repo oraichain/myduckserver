@@ -2,13 +2,14 @@ package pgserver
 
 import (
 	"context"
-	stdsql "database/sql"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/apecloud/myduckserver/adapter"
+	"github.com/apecloud/myduckserver/catalog"
 	"github.com/apecloud/myduckserver/pgserver/logrepl"
+	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/jackc/pglogrepl"
 )
 
@@ -16,7 +17,7 @@ import (
 // Example usage of CREATE SUBSCRIPTION SQL:
 //
 // CREATE SUBSCRIPTION mysub
-// CONNECTION 'dbname= host=127.0.0.1 port=15432 user=postgres password=root'
+// CONNECTION 'dbname= host=127.0.0.1 port=5432 user=postgres password=root'
 // PUBLICATION mypub;
 //
 // The statement creates a subscription named 'mysub' that connects to a PostgreSQL
@@ -30,10 +31,7 @@ type SubscriptionConfig struct {
 	Port             string
 	User             string
 	Password         string
-	LSN              pglogrepl.LSN
 }
-
-var lsnQueryIndex = 1
 
 var subscriptionRegex = regexp.MustCompile(`(?i)CREATE SUBSCRIPTION\s+(\w+)\s+CONNECTION\s+'([^']+)'\s+PUBLICATION\s+(\w+);`)
 var connectionRegex = regexp.MustCompile(`(\b\w+)=([\w\.\d]*)`)
@@ -48,17 +46,6 @@ func (config *SubscriptionConfig) ToConnectionInfo() string {
 func (config *SubscriptionConfig) ToDNS() string {
 	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
 		config.User, config.Password, config.Host, config.Port, config.DBName)
-}
-
-func (config *SubscriptionConfig) ToDuckDBQuery() []string {
-	return []string{
-		fmt.Sprintf("ATTACH '%s' AS pg_postgres (TYPE POSTGRES);", config.ToConnectionInfo()),
-		"SELECT * FROM postgres_query('pg_postgres', 'SELECT pg_current_wal_lsn()');",
-		"BEGIN;",
-		"COPY FROM DATABASE pg_postgres TO mysql;",
-		"COMMIT;",
-		"DETACH pg_postgres;",
-	}
 }
 
 func parseSubscriptionSQL(sql string) (*SubscriptionConfig, error) {
@@ -111,13 +98,26 @@ func parseSubscriptionSQL(sql string) (*SubscriptionConfig, error) {
 	return config, nil
 }
 
-func executeCreateSubscriptionSQL(h *ConnectionHandler, subscriptionConfig *SubscriptionConfig) error {
-	err := doSnapshot(h, subscriptionConfig)
+func (h *ConnectionHandler) executeCreateSubscriptionSQL(subscriptionConfig *SubscriptionConfig) error {
+	sqlCtx, err := h.duckHandler.sm.NewContextWithQuery(context.Background(), h.mysqlConn, "")
 	if err != nil {
-		return fmt.Errorf("failed to execute snapshot in CREATE SUBSCRIPTION: %w", err)
+		return fmt.Errorf("failed to create context for query: %w", err)
 	}
 
-	replicator, err := doCreateSubscription(h, subscriptionConfig)
+	lsn, err := h.doSnapshot(sqlCtx, subscriptionConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create snapshot for CREATE SUBSCRIPTION: %w", err)
+	}
+
+	// Do a checkpoint here to merge the WAL logs
+	// if _, err := adapter.ExecCatalog(sqlCtx, "FORCE CHECKPOINT"); err != nil {
+	// 	return fmt.Errorf("failed to execute FORCE CHECKPOINT: %w", err)
+	// }
+	// if _, err := adapter.ExecCatalog(sqlCtx, "PRAGMA force_checkpoint;"); err != nil {
+	// 	return fmt.Errorf("failed to execute PRAGMA force_checkpoint: %w", err)
+	// }
+
+	replicator, err := h.doCreateSubscription(sqlCtx, subscriptionConfig, lsn)
 	if err != nil {
 		return fmt.Errorf("failed to execute CREATE SUBSCRIPTION: %w", err)
 	}
@@ -127,41 +127,104 @@ func executeCreateSubscriptionSQL(h *ConnectionHandler, subscriptionConfig *Subs
 	return nil
 }
 
-func doSnapshot(h *ConnectionHandler, subscriptionConfig *SubscriptionConfig) error {
-
-	duckDBQueries := subscriptionConfig.ToDuckDBQuery()
-
-	for index, duckDBQuery := range duckDBQueries {
-		// Create a new SQL context for the DuckDB query
-		sqlCtx, err := h.duckHandler.sm.NewContextWithQuery(context.Background(), h.mysqlConn, duckDBQuery)
-		if err != nil {
-			return fmt.Errorf("failed to create context for query at index %d: %w", index, err)
-		}
-
-		// Execute the query
-		rows, err := adapter.Query(sqlCtx, duckDBQuery)
-		if err != nil {
-			return fmt.Errorf("query execution failed at index %d: %w", index, err)
-		}
-		defer func() {
-			closeErr := rows.Close()
-			if closeErr != nil {
-				err = fmt.Errorf("failed to close rows at index %d: %w", index, closeErr)
-			}
-		}()
-
-		// Process LSN query only for the specific index
-		if index == lsnQueryIndex {
-			if err := processLSN(rows, subscriptionConfig); err != nil {
-				return fmt.Errorf("failed to process LSN query at index %d: %w", index, err)
-			}
+func (h *ConnectionHandler) doSnapshot(sqlCtx *sql.Context, subscriptionConfig *SubscriptionConfig) (pglogrepl.LSN, error) {
+	// If there is ongoing transcation, commit it
+	if txn := adapter.TryGetTxn(sqlCtx); txn != nil {
+		if err := func() error {
+			defer txn.Rollback()
+			defer adapter.CloseTxn(sqlCtx)
+			return txn.Commit()
+		}(); err != nil {
+			return 0, fmt.Errorf("failed to commit current transaction: %w", err)
 		}
 	}
 
-	return nil
+	connInfo := subscriptionConfig.ToConnectionInfo()
+	attachName := fmt.Sprintf("__pg_src_%d__", sqlCtx.ID())
+	if _, err := adapter.ExecCatalog(sqlCtx, fmt.Sprintf("ATTACH '%s' AS %s (TYPE POSTGRES, READ_ONLY)", connInfo, attachName)); err != nil {
+		return 0, fmt.Errorf("failed to attach connection: %w", err)
+	}
+
+	defer func() {
+		if _, err := adapter.ExecCatalog(sqlCtx, fmt.Sprintf("DETACH %s", attachName)); err != nil {
+			h.logger.Warnf("failed to detach connection: %v", err)
+		}
+	}()
+
+	var currentLSN string
+	err := adapter.QueryRowCatalog(
+		sqlCtx,
+		fmt.Sprintf("SELECT * FROM postgres_query('%s', 'SELECT pg_current_wal_lsn()')", attachName),
+	).Scan(&currentLSN)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query WAL LSN: %w", err)
+	}
+
+	lsn, err := pglogrepl.ParseLSN(currentLSN)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse LSN: %w", err)
+	}
+
+	// COPY DATABASE is buggy - it corrupts the WAL so the server cannot be restarted.
+	// So we need to copy tables one by one.
+	// if _, err := adapter.ExecCatalogInTxn(sqlCtx, fmt.Sprintf("COPY FROM DATABASE %s TO mysql", attachName)); err != nil {
+	// 	return 0, fmt.Errorf("failed to copy from database: %w", err)
+	// }
+
+	type table struct {
+		schema string
+		name   string
+	}
+	var tables []table
+
+	// Get all tables from the source database
+	if err := func() error {
+		rows, err := adapter.QueryCatalog(sqlCtx, `SELECT database, schema, name FROM (SHOW ALL TABLES) WHERE database = '`+attachName+`'`)
+		if err != nil {
+			return fmt.Errorf("failed to query tables: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var database, schema, tableName string
+			if err := rows.Scan(&database, &schema, &tableName); err != nil {
+				return fmt.Errorf("failed to scan table: %w", err)
+			}
+			tables = append(tables, table{schema: schema, name: tableName})
+		}
+
+		return nil
+	}(); err != nil {
+		return 0, err
+	}
+
+	// Create all schemas in the target database
+	for _, t := range tables {
+		if _, err := adapter.ExecCatalogInTxn(sqlCtx, `CREATE SCHEMA IF NOT EXISTS `+catalog.QuoteIdentifierANSI(t.schema)); err != nil {
+			return 0, fmt.Errorf("failed to create schema: %w", err)
+		}
+	}
+
+	txn, err := adapter.GetCatalogTxn(sqlCtx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get transaction: %w", err)
+	}
+	defer txn.Rollback()
+	defer adapter.CloseTxn(sqlCtx)
+
+	for _, t := range tables {
+		if _, err := adapter.ExecCatalogInTxn(
+			sqlCtx,
+			`CREATE TABLE `+catalog.ConnectIdentifiersANSI(t.schema, t.name)+` AS FROM `+catalog.ConnectIdentifiersANSI(attachName, t.schema, t.name),
+		); err != nil {
+			return 0, fmt.Errorf("failed to create table: %w", err)
+		}
+	}
+
+	return lsn, txn.Commit()
 }
 
-func doCreateSubscription(h *ConnectionHandler, subscriptionConfig *SubscriptionConfig) (*logrepl.LogicalReplicator, error) {
+func (h *ConnectionHandler) doCreateSubscription(sqlCtx *sql.Context, subscriptionConfig *SubscriptionConfig, lsn pglogrepl.LSN) (*logrepl.LogicalReplicator, error) {
 	replicator, err := logrepl.NewLogicalReplicator(subscriptionConfig.ToDNS())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logical replicator: %w", err)
@@ -177,11 +240,6 @@ func doCreateSubscription(h *ConnectionHandler, subscriptionConfig *Subscription
 		return nil, fmt.Errorf("failed to create replication slot: %w", err)
 	}
 
-	sqlCtx, err := h.duckHandler.sm.NewContextWithQuery(context.Background(), h.mysqlConn, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create context for query: %w", err)
-	}
-
 	// `WriteWALPosition` and `WriteSubscription` execute in a transaction internally,
 	// so we start a transaction here and commit it after writing the WAL position.
 	tx, err := adapter.GetCatalogTxn(sqlCtx, nil)
@@ -191,7 +249,7 @@ func doCreateSubscription(h *ConnectionHandler, subscriptionConfig *Subscription
 	defer tx.Rollback()
 	defer adapter.CloseTxn(sqlCtx)
 
-	err = replicator.WriteWALPosition(sqlCtx, subscriptionConfig.PublicationName, subscriptionConfig.LSN)
+	err = replicator.WriteWALPosition(sqlCtx, subscriptionConfig.PublicationName, lsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write WAL position: %w", err)
 	}
@@ -202,26 +260,4 @@ func doCreateSubscription(h *ConnectionHandler, subscriptionConfig *Subscription
 	}
 
 	return replicator, tx.Commit()
-}
-
-// processLSN scans the rows for the LSN value and updates the subscriptionConfig.
-func processLSN(rows *stdsql.Rows, subscriptionConfig *SubscriptionConfig) error {
-	for rows.Next() {
-		var lsnStr string
-		if err := rows.Scan(&lsnStr); err != nil {
-			return fmt.Errorf("failed to scan LSN: %w", err)
-		}
-		lsn, err := pglogrepl.ParseLSN(lsnStr)
-		if err != nil {
-			return fmt.Errorf("failed to parse LSN: %w", err)
-		}
-		subscriptionConfig.LSN = lsn
-	}
-
-	// Check for iteration errors
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("error encountered during rows iteration: %w", err)
-	}
-
-	return nil
 }

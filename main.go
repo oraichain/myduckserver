@@ -120,6 +120,10 @@ func main() {
 
 	pool := backend.NewConnectionPool(provider.CatalogName(), provider.Connector(), provider.Storage())
 
+	if _, err := pool.ExecContext(context.Background(), "PRAGMA enable_checkpoint_on_shutdown"); err != nil {
+		logrus.WithError(err).Fatalln("Failed to enable checkpoint on shutdown")
+	}
+
 	if defaultTimeZone != "" {
 		_, err := pool.ExecContext(context.Background(), fmt.Sprintf(`SET TimeZone = '%s'`, defaultTimeZone))
 		if err != nil {
@@ -182,7 +186,7 @@ func main() {
 			if err != nil {
 				logrus.WithError(err).Fatalln("Failed to create logical replicator")
 			}
-			replicator.StartReplication(pgServer.NewInternalCtx(), pub)
+			go replicator.StartReplication(pgServer.NewInternalCtx(), pub)
 		}
 
 		go pgServer.Start()
