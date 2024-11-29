@@ -18,14 +18,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	stdsql "database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"regexp"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -65,18 +63,6 @@ type ConnectionHandler struct {
 
 // Set this env var to disable panic handling in the connection, which is useful when debugging a panic
 const disablePanicHandlingEnvVar = "DOLT_PGSQL_PANIC"
-
-// precompile a regex to match "select pg_catalog.pg_is_in_recovery();"
-var pgIsInRecoveryRegex = regexp.MustCompile(`(?i)^\s*select\s+pg_catalog\.pg_is_in_recovery\(\s*\)\s*;?\s*$`)
-
-// precompile a regex to match "select pg_catalog.pg_current_wal_lsn();" or "select pg_catalog.pg_last_wal_replay_lsn();"
-var pgWALLSNRegex = regexp.MustCompile(`(?i)^\s*select\s+pg_catalog\.(pg_current_wal_lsn|pg_last_wal_replay_lsn)\(\s*\)\s*;?\s*$`)
-
-// precompile a regex to match "select pg_catalog.current_setting('xxx');".
-var currentSettingRegex = regexp.MustCompile(`(?i)^\s*select\s+pg_catalog.current_setting\(\s*['"]([^'"]+)['"]\s*\)\s*;?\s*$`)
-
-// precompile a regex to match any "from pg_catalog.xxx" in the query.
-var pgCatalogRegex = regexp.MustCompile(`(?i)\s+from\s+pg_catalog\.`)
 
 // HandlePanics determines whether panics should be handled in the connection handler. See |disablePanicHandlingEnvVar|.
 var HandlePanics = true
@@ -264,36 +250,49 @@ func (h *ConnectionHandler) handleStartup() (bool, error) {
 
 // sendClientStartupMessages sends introductory messages to the client and returns any error
 func (h *ConnectionHandler) sendClientStartupMessages() error {
-	parameters := []struct {
+	sessParams := []struct {
 		Name  string
-		Value string
+		Value any
 	}{
-		// These are mock parameter status messages that are sent to the client
+		// These are session parameter status messages that are sent to the client
 		// to simulate a real PostgreSQL connection. Some clients may expect these
 		// to be sent, like pgpool, which will not work without them. Because
 		// if the paramter status message list sent by this server differs from
 		// the list of the other real PostgreSQL servers, pgpool can not establish
 		// a connection to this server.
-		{"in_hot_standby", "off"},
-		{"integer_datetimes", "on"},
-		{"TimeZone", "Etc/UTC"},
-		{"IntervalStyle", "postgres"},
-		{"is_superuser", "on"},
-		{"application_name", "psql"},
-		{"default_transaction_read_only", "off"},
-		{"scram_iterations", "4096"},
-		{"DateStyle", "ISO, MDY"},
-		{"standard_conforming_strings", "on"},
-		{"session_authorization", "postgres"},
-		{"client_encoding", "UTF8"},
-		{"server_version", "15.0"},
-		{"server_encoding", "UTF8"},
+		// Some of these may not exists in postgresConfigParameters(in doltgresql),
+		// which lists all the available parameters in PostgreSQL. In that case,
+		// we will use a mock value for that parameter. e.g. "on" for "is_superuser".
+		{"in_hot_standby", nil},
+		{"integer_datetimes", nil},
+		{"TimeZone", nil},
+		{"IntervalStyle", nil},
+		{"is_superuser", "on"}, // This is not specified in postgresConfigParameters now.
+		{"application_name", nil},
+		{"default_transaction_read_only", nil},
+		{"scram_iterations", nil},
+		{"DateStyle", nil},
+		{"standard_conforming_strings", nil},
+		{"session_authorization", "postgres"}, // This is not specified in postgresConfigParameters now.
+		{"client_encoding", nil},
+		{"server_version", nil},
+		{"server_encoding", nil},
 	}
 
-	for _, param := range parameters {
+	for _, param := range sessParams {
+		var value string
+		if param.Value != nil {
+			value = fmt.Sprintf("%v", param.Value)
+		} else {
+			_, v, ok := sql.SystemVariables.GetGlobal(param.Name)
+			if !ok {
+				return fmt.Errorf("error: %v variable was not found", param.Name)
+			}
+			value = fmt.Sprintf("%v", v)
+		}
 		if err := h.send(&pgproto3.ParameterStatus{
 			Name:  param.Name,
-			Value: param.Value,
+			Value: value,
 		}); err != nil {
 			return err
 		}
@@ -470,12 +469,6 @@ func (h *ConnectionHandler) handleQuery(message *pgproto3.Query) (endOfMessages 
 		return true, err
 	}
 
-	// Certain queries are handled directly by the handler instead of being passed to the engine
-	handled, err = h.handlePgCatalogQueries(message.String)
-	if handled || err != nil {
-		return true, err
-	}
-
 	query, err := h.convertQuery(message.String)
 	if err != nil {
 		return true, err
@@ -494,107 +487,6 @@ func (h *ConnectionHandler) handleQuery(message *pgproto3.Query) (endOfMessages 
 	}
 
 	return true, h.query(query)
-}
-
-// isInRecovery will get the count of
-func (h *ConnectionHandler) isInRecovery() (string, error) {
-	// Grab a sql.Context.
-	ctx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, "")
-	if err != nil {
-		return "f", err
-	}
-	var count int
-	if err := adapter.QueryRow(ctx, catalog.InternalTables.PgReplicationLSN.CountAllStmt()).Scan(&count); err != nil {
-		return "f", err
-	}
-
-	if count == 0 {
-		return "f", nil
-	} else {
-		return "t", nil
-	}
-}
-
-// readOneWALPositionStr reads one of the recorded WAL position from the WAL position table
-func (h *ConnectionHandler) readOneWALPositionStr() (string, error) {
-	// Grab a sql.Context.
-	ctx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, "")
-	if err != nil {
-		return "0/0", err
-	}
-	var slotName string
-	var lsn string
-	if err := adapter.QueryRow(ctx, catalog.InternalTables.PgReplicationLSN.SelectAllStmt()).Scan(&slotName, &lsn); err != nil {
-		if errors.Is(err, stdsql.ErrNoRows) {
-			// if no lsn is stored, return 0
-			return "0/0", nil
-		}
-		return "0/0", err
-	}
-
-	return lsn, nil
-}
-
-// queryPGSetting will query the pg_catalog.pg_setting table to see if the setting is set
-func (h *ConnectionHandler) queryPGSetting(name string) (string, error) {
-	// Grab a sql.Context.
-	ctx, err := h.duckHandler.NewContext(context.Background(), h.mysqlConn, "")
-	if err != nil {
-		return "", err
-	}
-	var setting string
-	if err := adapter.QueryRow(ctx, catalog.InternalTables.PGCurrentSetting.SelectStmt(), name).Scan(&setting); err != nil {
-		if errors.Is(err, stdsql.ErrNoRows) {
-			// if no this setting is found, return ""
-			return "", nil
-		}
-		return "", err
-	}
-
-	return setting, nil
-}
-
-// TODO(sean): This is a temporary work around for clients that query the views from schema 'pg_catalog'.
-// Remove this once we add the views for 'pg_catalog'.
-func (h *ConnectionHandler) handlePgCatalogQueries(statement string) (bool, error) {
-	lower := strings.ToLower(statement)
-	if pgIsInRecoveryRegex.MatchString(lower) {
-		isInRecovery, err := h.isInRecovery()
-		if err != nil {
-			return false, err
-		}
-		return true, h.query(ConvertedQuery{
-			String:       fmt.Sprintf(`SELECT '%s' AS "pg_is_in_recovery";`, isInRecovery),
-			StatementTag: "SELECT",
-		})
-	}
-	if matches := pgWALLSNRegex.FindStringSubmatch(lower); len(matches) == 2 {
-		lsnStr, err := h.readOneWALPositionStr()
-		if err != nil {
-			return false, err
-		}
-		return true, h.query(ConvertedQuery{
-			String:       fmt.Sprintf(`SELECT '%s' AS "%s";`, lsnStr, matches[1]),
-			StatementTag: "SELECT",
-		})
-	}
-	if matches := currentSettingRegex.FindStringSubmatch(lower); len(matches) == 2 {
-		setting, err := h.queryPGSetting(matches[1])
-		if err != nil {
-			return false, err
-		}
-		return true, h.query(ConvertedQuery{
-			String:       fmt.Sprintf(`SELECT '%s' AS "current_setting";`, setting),
-			StatementTag: "SELECT",
-		})
-	}
-	if pgCatalogRegex.MatchString(lower) {
-		return true, h.query(ConvertedQuery{
-			String:       pgCatalogRegex.ReplaceAllString(lower, " FROM __sys__."),
-			StatementTag: "SELECT",
-		})
-	}
-	return false, nil
 }
 
 // handleQueryOutsideEngine handles any queries that should be handled by the handler directly, rather than being
@@ -645,6 +537,11 @@ func (h *ConnectionHandler) handleQueryOutsideEngine(query ConvertedQuery) (hand
 		}
 	}
 
+	handled, err = h.handlePgCatalogQueries(query)
+	if handled || err != nil {
+		return true, true, err
+	}
+
 	return false, true, nil
 }
 
@@ -664,6 +561,20 @@ func (h *ConnectionHandler) handleParse(message *pgproto3.Parse) error {
 			Query: query,
 		}
 		return nil
+	}
+
+	handledOutsideEngine, err := shouldQueryBeHandledInPlace(query)
+	if err != nil {
+		return err
+	}
+	if handledOutsideEngine {
+		h.preparedStatements[message.Name] = PreparedStatementData{
+			Query:        query,
+			ReturnFields: nil,
+			BindVarTypes: nil,
+			Stmt:         nil,
+		}
+		return h.send(&pgproto3.ParseComplete{})
 	}
 
 	stmt, params, fields, err := h.duckHandler.ComPrepareParsed(context.Background(), h.mysqlConn, query.String, query.AST)
@@ -692,13 +603,13 @@ func (h *ConnectionHandler) handleParse(message *pgproto3.Parse) error {
 			bindVarTypes[i] = params[i]
 		}
 	}
-
 	h.preparedStatements[message.Name] = PreparedStatementData{
 		Query:        query,
 		ReturnFields: fields,
 		BindVarTypes: bindVarTypes,
 		Stmt:         stmt,
 	}
+
 	return h.send(&pgproto3.ParseComplete{})
 }
 
@@ -718,21 +629,25 @@ func (h *ConnectionHandler) handleDescribe(message *pgproto3.Describe) error {
 		// https://www.postgresql.org/docs/current/protocol-flow.html
 		// > Note that since Bind has not yet been issued, the formats to be used for returned columns are not yet known to the backend;
 		// > the format code fields in the RowDescription message will be zeroes in this case.
-		fields = slices.Clone(preparedStatementData.ReturnFields)
-		for i := range fields {
-			fields[i].Format = 0
-		}
+		if preparedStatementData.Stmt != nil {
+			fields = slices.Clone(preparedStatementData.ReturnFields)
+			for i := range fields {
+				fields[i].Format = 0
+			}
 
-		bindvarTypes = preparedStatementData.BindVarTypes
-		tag = preparedStatementData.Query.StatementTag
+			bindvarTypes = preparedStatementData.BindVarTypes
+			tag = preparedStatementData.Query.StatementTag
+		}
 	} else {
 		portalData, ok := h.portals[message.Name]
 		if !ok {
 			return fmt.Errorf("portal %s does not exist", message.Name)
 		}
 
-		fields = portalData.Fields
-		tag = portalData.Query.StatementTag
+		if portalData.Stmt != nil {
+			fields = portalData.Fields
+			tag = portalData.Query.StatementTag
+		}
 	}
 
 	return h.sendDescribeResponse(fields, bindvarTypes, tag)
@@ -748,6 +663,16 @@ func (h *ConnectionHandler) handleBind(message *pgproto3.Bind) error {
 	preparedData, ok := h.preparedStatements[message.PreparedStatement]
 	if !ok {
 		return fmt.Errorf("prepared statement %s does not exist", message.PreparedStatement)
+	}
+
+	if preparedData.Stmt == nil {
+		h.portals[message.DestinationPortal] = PortalData{
+			Query:  preparedData.Query,
+			Fields: nil,
+			Stmt:   nil,
+			Vars:   nil,
+		}
+		return h.send(&pgproto3.BindComplete{})
 	}
 
 	if preparedData.Query.AST == nil {

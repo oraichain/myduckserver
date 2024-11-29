@@ -188,7 +188,7 @@ func (h *DuckHandler) ComPrepareParsed(ctx context.Context, c *mysql.Conn, query
 		if stmtType == duckdb.DUCKDB_STATEMENT_TYPE_SELECT ||
 			stmtType == duckdb.DUCKDB_STATEMENT_TYPE_RELATION {
 			// Add LIMIT 0 to avoid executing the actual query.
-			query = "SELECT * FROM (" + query + ") LIMIT 0"
+			query = "SELECT * FROM (" + sql.RemoveSpaceAndDelimiter(query, ';') + ") LIMIT 0"
 		}
 		params := make([]any, len(paramTypes)) // all nil
 		rows, err = conn.QueryContext(sqlCtx, query, params...)
