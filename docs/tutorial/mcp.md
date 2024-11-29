@@ -1,6 +1,6 @@
 # Model Context Protocol
 
-The Model Context Protocol (MCP) is an open protocol initiated by [Anthropic] that enables integration between LLM applications and external data sources and tools. MyDuck Server work seamlessly with the official PostgreSQL MCP server implementation. This guide will walk you through the process of setting up a MyDuck Server instance and connecting it to the PostgreSQL MCP server.
+The [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP) is an open protocol initiated by [Anthropic](https://www.anthropic.com/) that enables integration between LLM applications and external data sources and tools. MyDuck Server works seamlessly with the official PostgreSQL MCP server implementation. This guide will walk you through the process of setting up a MyDuck Server instance and connecting it to the PostgreSQL MCP server.
 
 ## Steps
 
