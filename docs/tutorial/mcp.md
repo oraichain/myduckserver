@@ -8,7 +8,7 @@ The [Model Context Protocol](https://modelcontextprotocol.io/introduction) (MCP)
 
 2. Launch a new MyDuck Server instance. This can be done by using Docker or by [running the MyDuck Server binary](../../CONTRIBUTING.md). For this guide, we will use Docker.
     ```sh
-    docker run -d -p 15432:5432 --rm -d --name myduck-server-for-mcp apecloud/myduckserver:latest
+    docker run -d -p 15432:5432 --rm --name myduck-server-for-mcp apecloud/myduckserver:latest
     ```
 
 3. Insert some data into MyDuck Server. You can do this by connecting to MyDuck Server using a PostgreSQL client and running some SQL commands. For this guide, we will use the built-in `psql` command-line client and the Data on Energy dataset from [Our World in Data](https://ourworldindata.org/energy).
