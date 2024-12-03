@@ -1,4 +1,4 @@
-# Tutorial: Accessing MyDuck Server with PostgreSQL using psycopg, pyarrow, and polars
+# Tutorial: Accessing MyDuck Server with psycopg, pyarrow, and polars
 
 ## 0. Connecting to MyDuck Server using psycopg
 
@@ -6,6 +6,7 @@
 
 ```python
 import psycopg
+
 with psycopg.connect("dbname=postgres user=postgres host=127.0.0.1 port=5432", autocommit=True) as conn:
     with conn.cursor() as cur:
         ...
@@ -45,13 +46,16 @@ with cur.copy("COPY test.tb1 TO STDOUT") as copy:
         print(row)
 ```
 
-## 2. Importing and Exporting Data in pyarrow Format
+## 2. Importing and Exporting Data in [Arrow](https://arrow.apache.org/) Format
 
-`pyarrow` allows efficient data interchange between pandas DataFrames and MyDuck Server. Here is how to import and export data in `pyarrow` format:
+The `pyarrow` package allows efficient data interchange between DataFrame libraries and MyDuck Server. Here is how to import and export data in Arrow format:
 
 ### Creating a pandas DataFrame and Converting to Arrow Table
 
 ```python
+import pandas as pd
+import pyarrow as pa
+
 data = {
     'id': [1, 2, 3],
     'num': [100, 200, 300],
@@ -64,6 +68,8 @@ table = pa.Table.from_pandas(df)
 ### Writing Data to MyDuck Server in Arrow Format
 
 ```python
+import io
+
 output_stream = io.BytesIO()
 with pa.ipc.RecordBatchStreamWriter(output_stream, table.schema) as writer:
     writer.write_table(table)
@@ -78,10 +84,9 @@ arrow_data = io.BytesIO()
 with cur.copy("COPY test.tb1 TO STDOUT (FORMAT arrow)") as copy:
     for block in copy:
         arrow_data.write(block)
-    print(arrow_data.getvalue())
 ```
 
-### Converting Arrow Data to Arrow DataFrame
+### Deserializing Arrow Data to Arrow DataFrame
 
 ```python
 with pa.ipc.open_stream(arrow_data.getvalue()) as reader:
@@ -89,7 +94,7 @@ with pa.ipc.open_stream(arrow_data.getvalue()) as reader:
     print(arrow_df)
 ```
 
-### Converting Arrow Data to Pandas DataFrame
+### Deserializing Arrow Data to pandas DataFrame
 
 ```python
 with pa.ipc.open_stream(arrow_data.getvalue()) as reader:
@@ -97,18 +102,20 @@ with pa.ipc.open_stream(arrow_data.getvalue()) as reader:
     print(pandas_df)
 ```
 
-## 3. Using polars to Convert pyarrow Format Data
+## 3. Using Polars to Process DataFrames
 
-`polars` is a fast DataFrame library that can work with `pyarrow` data. Here is how to use `polars` to convert `pyarrow` format data:
+[Polars](https://github.com/pola-rs/polars) is a fast DataFrame library that can work with Arrow data. Here is how to use Polars to read Arrow or pandas dataframes:
 
-### Converting Pandas DataFrame to polars DataFrame
+### Converting Arrow DataFrame to Polars DataFrame
+
+```python
+import polars as pl
+
+polars_df = pl.from_arrow(arrow_df)
+```
+
+### Converting pandas DataFrame to Polars DataFrame
 
 ```python
 polars_df = pl.from_pandas(pandas_df)
-```
-
-### Converting Arrow DataFrame to polars DataFrame
-
-```python
-polars_df = pl.from_arrow(arrow_df)
 ```
