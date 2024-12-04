@@ -11,10 +11,10 @@
 
 ## 📑 Table of Contents
 
-- [Why MyDuck](#❓-why-myduck-❓)
-- [Key Features](#✨-key-features)
-- [Performance](#📊-performance)
-- [Getting Started](#🏃‍♂️-getting-started)
+- [Why MyDuck](#-why-myduck-)
+- [Key Features](#-key-features)
+- [Performance](#-performance)
+- [Getting Started](#-getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Usage](#usage)
@@ -25,10 +25,10 @@
   - [Already Using DuckDB?](#already-using-duckdb)
   - [LLM Integration](#llm-integration)
   - [Access from Python](#access-from-python)
-- [Roadmap](#🎯-roadmap)
-- [Contributing](#💡-contributing)
-- [Acknowledgements](#💗-acknowledgements)
-- [License](#📝-license)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [Acknowledgements](#-acknowledgements)
+- [License](#-license)
 
 ## ❓ Why MyDuck ❓
 
