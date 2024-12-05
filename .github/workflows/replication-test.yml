@@ -78,18 +78,21 @@ jobs:
 
       - name: Verify initial replication
         run: |
-          # Query source data
+          # Query source data & MyDuck data
           if [ "${{ matrix.source }}" = "mysql" ]; then
             docker exec source-db mysql -uroot -proot test \
-              -e "SELECT * FROM items ORDER BY id;" > source_data.csv
+              -e "SELECT * FROM items ORDER BY id;" | tee source_data.csv
+
+            docker exec myduck psql -U postgres -h 127.0.0.1 \
+              -c "\COPY (SELECT * FROM test.items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
+
           else
             docker exec source-db psql -U postgres -h 127.0.0.1 test \
               -c "\COPY (SELECT * FROM items ORDER BY id) TO STDOUT WITH CSV;" | tee source_data.csv
-          fi
 
-          # Query MyDuck data through Postgres interface
-          docker exec myduck psql -U postgres -h 127.0.0.1 \
-            -c "\COPY (SELECT * FROM items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
+            docker exec myduck psql -U postgres -h 127.0.0.1 \
+              -c "\COPY (SELECT * FROM items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
+          fi
 
           # Compare data using DuckDB
           duckdb --csv -c "
