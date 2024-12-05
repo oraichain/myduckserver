@@ -11,7 +11,7 @@ parse_dsn() {
     if [ -z "$SOURCE_DSN" ]; then
         echo "Error: SOURCE_DSN environment variable is not set"
         exit 1
-    }
+    fi
 
     local dsn="$SOURCE_DSN"
 
