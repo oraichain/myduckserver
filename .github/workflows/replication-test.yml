@@ -78,21 +78,21 @@ jobs:
 
       - name: Verify initial replication
         run: |
-          # Query source data & MyDuck data
+          # Query source data
+          SCHEMA=""
           if [ "${{ matrix.source }}" = "mysql" ]; then
             docker exec source-db mysql -uroot -proot test \
               -e "SELECT * FROM items ORDER BY id;" | tee source_data.csv
-
-            docker exec myduck psql -U postgres -h 127.0.0.1 \
-              -c "\COPY (SELECT * FROM test.items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
-
+            SCHEMA=test
           else
             docker exec source-db psql -U postgres -h 127.0.0.1 test \
               -c "\COPY (SELECT * FROM items ORDER BY id) TO STDOUT WITH CSV;" | tee source_data.csv
-
-            docker exec myduck psql -U postgres -h 127.0.0.1 \
-              -c "\COPY (SELECT * FROM items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
+            SCHEMA=public
           fi
+
+          # Query MyDuck data
+          docker exec myduck psql -U postgres -h 127.0.0.1 \
+            -c "\COPY (SELECT * FROM ${SCHEMA}.items ORDER BY id) TO STDOUT WITH CSV;" | tee myduck_data.csv
 
           # Compare data using DuckDB
           duckdb --csv -c "
@@ -113,12 +113,15 @@ jobs:
       - name: Test replication of new data
         run: |
           # Insert new data in source
+          SCHEMA=""
           if [ "${{ matrix.source }}" = "mysql" ]; then
             docker exec source-db mysql -uroot -proot test \
               -e "INSERT INTO items VALUES (3, 'test3');"
+            SCHEMA=test
           else
             docker exec source-db psql -U postgres test \
               -c "INSERT INTO items VALUES (3, 'test3');"
+            SCHEMA=public
           fi
 
           # Wait for replication
@@ -126,7 +129,7 @@ jobs:
 
           # Verify new data was replicated
           docker exec myduck psql -t -U postgres -h 127.0.0.1 -c \
-            "SELECT COUNT(*) FROM items WHERE id = 3;" | tr -d ' ' | tee count.txt
+            "SELECT COUNT(*) FROM ${SCHEMA}.items WHERE id = 3;" | tr -d ' ' | tee count.txt
 
           if grep -q '^1$' count.txt; then
             echo 'Replication of new data verified successfully'
