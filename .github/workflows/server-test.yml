@@ -63,8 +63,8 @@ jobs:
       - name: Test DuckDB SQL features
         run: |
           # Test some DuckDB-specific features through PostgreSQL protocol
+          psql -h 127.0.0.1 -p 15432 -U postgres -c "CREATE TABLE numbers AS SELECT * FROM range(1, 5) t(n);"
           psql -h 127.0.0.1 -p 15432 -U postgres -c "
-            CREATE TABLE numbers AS SELECT * FROM range(1, 5) t(n);
             SELECT list_aggregate(list(n), 'sum') as list_sum FROM numbers;" | tee duckdb_results.txt
 
           # Verify results (sum should be 10)
