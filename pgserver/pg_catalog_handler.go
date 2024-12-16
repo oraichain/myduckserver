@@ -258,7 +258,7 @@ var pgCatalogHandlers = map[string]PGCatalogHandler{
 		Handler: func(h *ConnectionHandler, query ConvertedQuery) (bool, error) {
 			showVar, ok := query.AST.(*tree.ShowVar)
 			if !ok {
-				return false, fmt.Errorf("error: invalid show_variables query: %v", query.String)
+				return false, nil
 			}
 			key := strings.ToLower(showVar.Name)
 			if key != "all" {
@@ -375,9 +375,10 @@ var pgCatalogHandlers = map[string]PGCatalogHandler{
 	},
 }
 
-// checkIsPgCatalogStmtAndHandledInPlace checks whether a query matches any regex in the pgCatalogHandlers
-// and the query should be handled in place rather than being passed to the engine.
-func checkIsPgCatalogStmtAndHandledInPlace(sql ConvertedQuery) (bool, error) {
+// shouldQueryBeHandledInPlace determines whether a query should be handled in place, rather than being
+// passed to the engine. This is useful for queries that are not supported by the engine, or that require
+// special handling.
+func shouldQueryBeHandledInPlace(sql ConvertedQuery) (bool, error) {
 	handler, ok := pgCatalogHandlers[sql.StatementTag]
 	if !ok {
 		return false, nil
@@ -397,11 +398,4 @@ func (h *ConnectionHandler) handlePgCatalogQueries(sql ConvertedQuery) (bool, er
 		return false, nil
 	}
 	return handler.Handler(h, sql)
-}
-
-// shouldQueryBeHandledInPlace determines whether a query should be handled in place, rather than being
-// passed to the engine. This is useful for queries that are not supported by the engine, or that require
-// special handling.
-func shouldQueryBeHandledInPlace(query ConvertedQuery) (bool, error) {
-	return checkIsPgCatalogStmtAndHandledInPlace(query)
 }
