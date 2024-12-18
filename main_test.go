@@ -21,6 +21,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1099,14 +1100,6 @@ func TestCreateTable(t *testing.T) {
 		"CREATE_TABLE_t1_(____pk_bigint_primary_key,____v1_bigint_default_(2)_comment_'hi_there',____index_idx_v1_(v1)_comment_'index_here'____)",
 		"CREATE_TABLE_t1_SELECT_*_from_mytable",
 		"CREATE_TABLE_t1_SELECT_*_from_mytable",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment_unique)",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment_unique)",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_index_(j))",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_index_(j))",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_unique(j,k))",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_unique(j,k))",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_index_(j,k))",
-		"CREATE_TABLE_t1_(i_int_primary_key,_j_int_auto_increment,_k_int,_index_(j,k))",
 		"CREATE_TABLE_t1_(_____pk_int_NOT_NULL,_____col1_blob_DEFAULT_(_utf8mb4'abc'),_____col2_json_DEFAULT_(json_object(_utf8mb4'a',1)),_____col3_text_DEFAULT_(_utf8mb4'abc'),_____PRIMARY_KEY_(pk)___)",
 		"CREATE_TABLE_t1_(_____pk_int_NOT_NULL,_____col1_blob_DEFAULT_(_utf8mb4'abc'),_____col2_json_DEFAULT_(json_object(_utf8mb4'a',1)),_____col3_text_DEFAULT_(_utf8mb4'abc'),_____PRIMARY_KEY_(pk)___)",
 		"CREATE_TABLE_td_(_____pk_int_PRIMARY_KEY,_____col2_int_NOT_NULL_DEFAULT_2,______col3_double_NOT_NULL_DEFAULT_(round(-(1.58),0)),_____col4_varchar(10)_DEFAULT_'new_row',___________col5_float_DEFAULT_33.33,___________col6_int_DEFAULT_NULL,_____col7_timestamp_DEFAULT_NOW(),_____col8_bigint_DEFAULT_(NOW())___)",
@@ -1165,11 +1158,9 @@ func TestCreateTable(t *testing.T) {
 		"CREATE_EVENT_foo_ON_SCHEDULE_EVERY_1_YEAR_DO_CREATE_TABLE_bar_AS_SELECT_1;",
 		"trigger_contains_CREATE_TABLE_AS",
 		"CREATE_TRIGGER_foo_AFTER_UPDATE_ON_t_FOR_EACH_ROW_BEGIN_CREATE_TABLE_bar_AS_SELECT_1;_END;",
-		"create_table_with_non_primary_auto_increment_column",
 		"insert_into_t1_(b)_values_(1),_(2)",
 		"show_create_table_t1",
 		"select_*_from_t1_order_by_b",
-		"create_table_with_non_primary_auto_increment_column,_separate_unique_key",
 		"insert_into_t1_(b)_values_(1),_(2)",
 		"show_create_table_t1",
 		"select_*_from_t1_order_by_b",
@@ -1590,48 +1581,48 @@ func TestModifyColumn(t *testing.T) {
 		{
 			Name: "column at end with default",
 			SetUpScript: []string{
-				"CREATE TABLE mytable_modify_column (i bigint not null, s varchar(20) not null comment 'column s')",
+				"CREATE TABLE mytable_m1 (i bigint not null, s varchar(20) not null comment 'column s')",
 			},
 			Assertions: []queries.ScriptTestAssertion{
 				{
-					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i bigint NOT NULL COMMENT 'modified'",
+					Query:    "ALTER TABLE mytable_m1 MODIFY COLUMN i bigint NOT NULL COMMENT 'modified'",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
-					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 1 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m1 /* 1 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "", nil, "", "", "modified"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
 					},
 				},
 				{
-					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i TINYINT NOT NULL COMMENT 'yes'",
+					Query:    "ALTER TABLE mytable_m1 MODIFY COLUMN i TINYINT NOT NULL COMMENT 'yes'",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
-					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 2 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m1 /* 2 */",
 					Expected: []sql.Row{
 						{"i", "tinyint", nil, "NO", "", nil, "", "", "yes"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
 					},
 				},
 				{
-					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok'",
+					Query:    "ALTER TABLE mytable_m1 MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok'",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
-					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 3 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m1 /* 3 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "NO", "", nil, "", "", "column s"},
 					},
 				},
 				{
-					Query:    "ALTER TABLE mytable_modify_column MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
+					Query:    "ALTER TABLE mytable_m1 MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
-					Query: "SHOW FULL COLUMNS FROM mytable_modify_column /* 4 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m1 /* 4 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
@@ -1640,43 +1631,38 @@ func TestModifyColumn(t *testing.T) {
 			},
 		},
 		{
-			Name:        "auto increment attribute",
-			SetUpScript: []string{},
+			Name: "auto increment attribute",
+			SetUpScript: []string{
+				"CREATE TABLE mytable_m2 (i bigint not null primary key, s varchar(20) comment 'changed')",
+			},
 			Assertions: []queries.ScriptTestAssertion{
 				{
-					Skip:     true,
-					Query:    "ALTER TABLE mytable MODIFY i BIGINT auto_increment",
+					Query:    "ALTER TABLE mytable_m2 MODIFY i BIGINT auto_increment",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
-					Skip:  true,
-					Query: "SHOW FULL COLUMNS FROM mytable /* 1 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m2 /* 1 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "PRI", nil, "auto_increment", "", ""},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
 					},
 				},
 				{
-					Skip:  true,
-					Query: "insert into mytable (s) values ('new row')",
+					Query: "insert into mytable_m2 (s) values ('new row')",
 				},
 				{
-					Skip:        true,
-					Query:       "ALTER TABLE mytable add column i2 bigint auto_increment",
+					Query:       "ALTER TABLE mytable_m2 add column i2 bigint auto_increment",
 					ExpectedErr: sql.ErrInvalidAutoIncCols,
 				},
 				{
-					Skip:  true,
-					Query: "alter table mytable add column i2 bigint",
+					Query: "alter table mytable_m2 add column i2 bigint",
 				},
 				{
-					Skip:        true,
-					Query:       "ALTER TABLE mytable modify column i2 bigint auto_increment",
+					Query:       "ALTER TABLE mytable_m2 modify column i2 bigint auto_increment",
 					ExpectedErr: sql.ErrInvalidAutoIncCols,
 				},
 				{
-					Skip:  true,
-					Query: "SHOW FULL COLUMNS FROM mytable /* 2 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m2 /* 2 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "PRI", nil, "auto_increment", "", ""},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
@@ -1685,12 +1671,12 @@ func TestModifyColumn(t *testing.T) {
 				},
 				{
 					Skip:     true,
-					Query:    "ALTER TABLE mytable MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok' FIRST",
+					Query:    "ALTER TABLE mytable_m2 MODIFY COLUMN i BIGINT NOT NULL COMMENT 'ok' FIRST",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
 					Skip:  true,
-					Query: "SHOW FULL COLUMNS FROM mytable /* 3 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m2 /* 3 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "PRI", nil, "", "", "ok"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
@@ -1699,12 +1685,12 @@ func TestModifyColumn(t *testing.T) {
 				},
 				{
 					Skip:     true,
-					Query:    "ALTER TABLE mytable MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
+					Query:    "ALTER TABLE mytable_m2 MODIFY COLUMN s VARCHAR(20) NULL COMMENT 'changed'",
 					Expected: []sql.Row{{types.NewOkResult(0)}},
 				},
 				{
 					Skip:  true,
-					Query: "SHOW FULL COLUMNS FROM mytable /* 4 */",
+					Query: "SHOW FULL COLUMNS FROM mytable_m2 /* 4 */",
 					Expected: []sql.Row{
 						{"i", "bigint", nil, "NO", "PRI", nil, "", "", "ok"},
 						{"s", "varchar(20)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed"},
@@ -1760,8 +1746,8 @@ func RunModifyColumnTest(t *testing.T, harness enginetest.Harness) {
 			se.NewConnection(ctx)
 		}
 		enginetest.TestQueryWithContext(t, ctx, e, harness, "select database()", []sql.Row{{nil}}, nil, nil, nil)
-		enginetest.TestQueryWithContext(t, ctx, e, harness, "ALTER TABLE mydb.mytable_modify_column MODIFY COLUMN s VARCHAR(21) NULL COMMENT 'changed again'", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
-		enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW FULL COLUMNS FROM mydb.mytable_modify_column", []sql.Row{
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "ALTER TABLE mydb.mytable_m1 MODIFY COLUMN s VARCHAR(21) NULL COMMENT 'changed again'", []sql.Row{{types.NewOkResult(0)}}, nil, nil, nil)
+		enginetest.TestQueryWithContext(t, ctx, e, harness, "SHOW FULL COLUMNS FROM mydb.mytable_m1", []sql.Row{
 			{"i", "bigint", nil, "NO", "", nil, "", "", "ok"},
 			{"s", "varchar(21)", "utf8mb4_0900_bin", "YES", "", nil, "", "", "changed again"},
 		}, nil, nil, nil)
@@ -2214,12 +2200,8 @@ func TestAlterTable(t *testing.T) {
 		"create table t35 (i bigint primary key, s varchar(20), s2 varchar(20))",
 		// skip "drop column prevents foreign key violations" since foreign keys are not supported
 		"create table t36 (i bigint primary key, j varchar(20))",
-		// skip "ALTER TABLE remove AUTO_INCREMENT" since AUTO_INCREMENT is not supported yet
-		"CREATE TABLE t40 (pk int AUTO_INCREMENT PRIMARY KEY, val int)",
 		// skip "ALTER TABLE does not change column collations"
 		"CREATE TABLE test1 (v1 VARCHAR(200), v2 ENUM('a'), v3 SET('a'));",
-		// skip "ALTER TABLE AUTO INCREMENT no-ops on table with no original auto increment key"
-		"CREATE table test (pk int primary key)",
 		// skip "ALTER TABLE MODIFY column with UNIQUE KEY" since duckdb has more strict rules for modifying columns with constraints
 		"CREATE table test (pk int primary key, uk int unique)",
 		// skip "ALTER TABLE MODIFY column making UNIQUE" due to differences in error messages
@@ -2265,9 +2247,11 @@ func TestAddDropPks(t *testing.T) {
 }
 
 func TestAddAutoIncrementColumn(t *testing.T) {
-	t.Skip("wait for fix")
 	for _, script := range queries.AlterTableAddAutoIncrementScripts {
-		enginetest.TestScript(t, NewDefaultDuckHarness(), script)
+		// https://github.com/duckdb/duckdb/pull/14419
+		if strings.Contains(script.Name, "no primary key") || strings.Contains(script.Name, "no key") {
+			enginetest.TestScript(t, NewDefaultDuckHarness(), script)
+		}
 	}
 }
 

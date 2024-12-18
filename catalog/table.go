@@ -11,8 +11,8 @@ import (
 	"github.com/apecloud/myduckserver/configuration"
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/dolthub/go-mysql-server/sql/expression"
+	"github.com/google/uuid"
 	"github.com/marcboeker/go-duckdb"
-	"github.com/sirupsen/logrus"
 )
 
 type Table struct {
@@ -68,8 +68,13 @@ func (t *Table) withComment(comment *Comment[ExtraTableInfo]) *Table {
 	return t
 }
 
-func (t *Table) withSchema(ctx *sql.Context) *Table {
-	t.schema = getPKSchema(ctx, t.db.catalog, t.db.name, t.name)
+func (t *Table) withSchema(ctx *sql.Context) error {
+	schema, err := getPKSchema(ctx, t.db.catalog, t.db.name, t.name)
+	if err != nil {
+		return err
+	}
+
+	t.schema = schema
 
 	// https://github.com/apecloud/myduckserver/issues/272
 	if len(t.schema.PkOrdinals) == 0 && configuration.IsReplicationWithoutIndex() {
@@ -80,7 +85,7 @@ func (t *Table) withSchema(ctx *sql.Context) *Table {
 		t.schema = sql.NewPrimaryKeySchema(t.schema.Schema, t.comment.Meta.PkOrdinals...)
 	}
 
-	return t
+	return nil
 }
 
 func (t *Table) ExtraTableInfo() ExtraTableInfo {
@@ -112,20 +117,25 @@ func (t *Table) Schema() sql.Schema {
 	return t.schema.Schema
 }
 
-func getPKSchema(ctx *sql.Context, catalogName, dbName, tableName string) sql.PrimaryKeySchema {
+func getPKSchema(ctx *sql.Context, catalogName, dbName, tableName string) (sql.PrimaryKeySchema, error) {
 	var schema sql.Schema
 
 	columns, err := queryColumns(ctx, catalogName, dbName, tableName)
 	if err != nil {
-		panic(ErrDuckDB.New(err))
+		return sql.PrimaryKeySchema{}, ErrDuckDB.New(err)
 	}
 
 	for _, columnInfo := range columns {
 		decodedComment := DecodeComment[MySQLType](columnInfo.Comment.String)
 
 		defaultValue := (*sql.ColumnDefaultValue)(nil)
-		if columnInfo.ColumnDefault.Valid {
+		if columnInfo.ColumnDefault.Valid && decodedComment.Meta.Default != "" {
 			defaultValue = sql.NewUnresolvedColumnDefaultValue(decodedComment.Meta.Default)
+		}
+
+		var extra string
+		if decodedComment.Meta.AutoIncrement {
+			extra = "auto_increment"
 		}
 
 		column := &sql.Column{
@@ -137,6 +147,7 @@ func getPKSchema(ctx *sql.Context, catalogName, dbName, tableName string) sql.Pr
 			Default:        defaultValue,
 			AutoIncrement:  decodedComment.Meta.AutoIncrement,
 			Comment:        decodedComment.Text,
+			Extra:          extra,
 		}
 
 		schema = append(schema, column)
@@ -146,7 +157,7 @@ func getPKSchema(ctx *sql.Context, catalogName, dbName, tableName string) sql.Pr
 	primaryKeyOrdinals := getPrimaryKeyOrdinals(ctx, catalogName, dbName, tableName)
 	setPrimaryKeyColumns(schema, primaryKeyOrdinals)
 
-	return sql.NewPrimaryKeySchema(schema, primaryKeyOrdinals...)
+	return sql.NewPrimaryKeySchema(schema, primaryKeyOrdinals...), nil
 }
 
 func setPrimaryKeyColumns(schema sql.Schema, ordinals []int) {
@@ -193,16 +204,18 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// TODO: Column order is ignored as DuckDB does not support it.
+
 	typ, err := DuckdbDataType(column.Type)
 	if err != nil {
 		return err
 	}
 
-	sql := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN "%s" %s`, FullTableName(t.db.catalog, t.db.name, t.name), column.Name, typ.name)
+	var sqls []string
+	sql := `ALTER TABLE ` + FullTableName(t.db.catalog, t.db.name, t.name) + ` ADD COLUMN ` + QuoteIdentifierANSI(column.Name) + ` ` + typ.name
 
-	if !column.Nullable {
-		sql += " NOT NULL"
-	}
+	temporary := t.db.catalog == "temp"
+	var sequenceName, fullSequenceName string
 
 	if column.Default != nil {
 		typ.mysql.Default = column.Default.String()
@@ -211,18 +224,77 @@ func (t *Table) AddColumn(ctx *sql.Context, column *sql.Column, order *sql.Colum
 			return err
 		}
 		sql += " DEFAULT " + defaultExpr
+	} else if column.AutoIncrement {
+		typ.mysql.AutoIncrement = true
+
+		// Generate a random sequence name.
+		uuid, err := uuid.NewRandom()
+		if err != nil {
+			return err
+		}
+		sequenceName = SequenceNamePrefix + uuid.String()
+		if temporary {
+			fullSequenceName = `temp.main."` + sequenceName + `"`
+		} else {
+			fullSequenceName = InternalSchemas.SYS.Schema + `."` + sequenceName + `"`
+		}
+
+		defaultExpr := `nextval('` + fullSequenceName + `')`
+		sql += " DEFAULT " + defaultExpr
 	}
 
-	// add comment
-	comment := NewCommentWithMeta(column.Comment, typ.mysql)
-	sql += fmt.Sprintf(`; COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalog, t.db.name, t.name, column.Name), comment.Encode())
+	if column.AutoIncrement {
+		if temporary {
+			sqls = append(sqls, `CREATE TEMP SEQUENCE "`+sequenceName+`"`)
+		} else {
+			sqls = append(sqls, `CREATE SEQUENCE `+fullSequenceName)
+		}
+	}
 
-	_, err = adapter.Exec(ctx, sql)
+	sqls = append(sqls, sql)
+
+	// DuckDB does not support constraints in ALTER TABLE ADD COLUMN statement,
+	// so we need to add NOT NULL constraint separately.
+	// > Parser Error: Adding columns with constraints not yet supported
+	if !column.Nullable {
+		sqls = append(sqls, `ALTER TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` ALTER COLUMN `+QuoteIdentifierANSI(column.Name)+` SET NOT NULL`)
+	}
+
+	// Add column comment
+	comment := NewCommentWithMeta(column.Comment, typ.mysql)
+	sqls = append(sqls, `COMMENT ON COLUMN `+FullColumnName(t.db.catalog, t.db.name, t.name, column.Name)+` IS '`+comment.Encode()+`'`)
+
+	// Add table comment if it is AUTO_INCREMENT or PRIMARY KEY
+	tableInfo := t.comment.Meta
+	tableInfoChanged := false
+	if column.AutoIncrement {
+		tableInfo.Sequence = fullSequenceName
+		tableInfoChanged = true
+	}
+	if column.PrimaryKey {
+		sqls = append(sqls, `ALTER TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` ADD PRIMARY KEY (`+QuoteIdentifierANSI(column.Name)+`)`)
+		tableInfo.PkOrdinals = []int{len(t.schema.Schema)}
+		tableInfoChanged = true
+	}
+	if tableInfoChanged {
+		comment := NewCommentWithMeta(t.comment.Text, tableInfo)
+		sqls = append(sqls, `COMMENT ON TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` IS '`+comment.Encode()+`'`)
+	}
+
+	_, err = adapter.Exec(ctx, strings.Join(sqls, "; "))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
 
-	return nil
+	// Update the sequence name only after the column is successfully added.
+	if column.AutoIncrement {
+		t.comment.Meta.Sequence = tableInfo.Sequence
+	}
+	// Update the PK ordinals only after the column is successfully added.
+	if column.PrimaryKey {
+		t.comment.Meta.PkOrdinals = tableInfo.PkOrdinals
+	}
+	return t.withSchema(ctx)
 }
 
 // DropColumn implements sql.AlterableTable.
@@ -230,14 +302,37 @@ func (t *Table) DropColumn(ctx *sql.Context, columnName string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	sql := fmt.Sprintf(`ALTER TABLE %s DROP COLUMN "%s"`, FullTableName(t.db.catalog, t.db.name, t.name), columnName)
+	// Check if the column is AUTO_INCREMENT
+	autoIncrement := false
+	for _, column := range t.schema.Schema {
+		if column.AutoIncrement && strings.EqualFold(column.Name, columnName) {
+			autoIncrement = true
+			break
+		}
+	}
+
+	sql := `ALTER TABLE ` + FullTableName(t.db.catalog, t.db.name, t.name) + ` DROP COLUMN ` + QuoteIdentifierANSI(columnName)
+
+	if autoIncrement {
+		// Drop the sequence
+		sql += `; DROP SEQUENCE IF EXISTS ` + t.comment.Meta.Sequence
+		// Remove the sequence name from the table comment
+		extraInfo := t.comment.Meta
+		extraInfo.Sequence = ""
+		comment := NewCommentWithMeta(t.comment.Text, extraInfo)
+		sql += `; COMMENT ON TABLE ` + FullTableName(t.db.catalog, t.db.name, t.name) + ` IS '` + comment.Encode() + `'`
+	}
 
 	_, err := adapter.Exec(ctx, sql)
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
 
-	return nil
+	// Update the sequence name only after the column is successfully dropped.
+	if autoIncrement {
+		t.comment.Meta.Sequence = ""
+	}
+	return t.withSchema(ctx)
 }
 
 // ModifyColumn implements sql.AlterableTable.
@@ -250,44 +345,135 @@ func (t *Table) ModifyColumn(ctx *sql.Context, columnName string, column *sql.Co
 		return err
 	}
 
-	baseSQL := fmt.Sprintf(`ALTER TABLE %s ALTER COLUMN "%s"`, FullTableName(t.db.catalog, t.db.name, t.name), columnName)
-	sqls := []string{
-		fmt.Sprintf(`%s TYPE %s`, baseSQL, typ.name),
+	// Find existing column to check for AUTO_INCREMENT and PRIMARY KEY
+	var oldColumn *sql.Column
+	var oldColumnIndex int
+	for i, col := range t.schema.Schema {
+		if strings.EqualFold(col.Name, columnName) {
+			oldColumnIndex, oldColumn = i, col
+			break
+		}
+	}
+	if oldColumn == nil {
+		return sql.ErrColumnNotFound.New(columnName)
 	}
 
-	if column.Nullable {
-		sqls = append(sqls, fmt.Sprintf(`%s DROP NOT NULL`, baseSQL))
-	} else {
-		sqls = append(sqls, fmt.Sprintf(`%s SET NOT NULL`, baseSQL))
+	baseSQL := `ALTER TABLE ` + FullTableName(t.db.catalog, t.db.name, t.name) + ` ALTER COLUMN ` + QuoteIdentifierANSI(columnName)
+	var sqls []string
+
+	// Add type modification
+	if !oldColumn.Type.Equals(column.Type) {
+		sqls = append(sqls, baseSQL+` TYPE `+typ.name)
 	}
 
-	if column.Default != nil {
+	// Handle nullability
+	if oldColumn.Nullable && !column.Nullable {
+		sqls = append(sqls, baseSQL+` SET NOT NULL`)
+	} else if !oldColumn.Nullable && column.Nullable {
+		sqls = append(sqls, baseSQL+` DROP NOT NULL`)
+	}
+
+	// Handle default value if not AUTO_INCREMENT
+	if !column.AutoIncrement && column.Default != nil {
 		typ.mysql.Default = column.Default.String()
 		defaultExpr, err := parseDefaultValue(typ.mysql.Default)
 		if err != nil {
 			return err
 		}
-		sqls = append(sqls, fmt.Sprintf(`%s SET DEFAULT %s`, baseSQL, defaultExpr))
-	} else {
-		sqls = append(sqls, fmt.Sprintf(`%s DROP DEFAULT`, baseSQL))
+		sqls = append(sqls, baseSQL+` SET DEFAULT `+defaultExpr)
 	}
 
+	tableInfo := t.comment.Meta
+	tableInfoChanged := false
+
+	temporary := t.db.catalog == "temp"
+	var sequenceName, fullSequenceName string
+
+	// Handle AUTO_INCREMENT changes
+	if !oldColumn.AutoIncrement && column.AutoIncrement {
+		// Adding AUTO_INCREMENT
+		typ.mysql.AutoIncrement = true
+		uuid, err := uuid.NewRandom()
+		if err != nil {
+			return err
+		}
+		sequenceName = SequenceNamePrefix + uuid.String()
+		if temporary {
+			fullSequenceName = `temp.main."` + sequenceName + `"`
+		} else {
+			fullSequenceName = InternalSchemas.SYS.Schema + `."` + sequenceName + `"`
+		}
+
+		if temporary {
+			sqls = append(sqls, `CREATE TEMP SEQUENCE "`+sequenceName+`"`)
+		} else {
+			sqls = append(sqls, `CREATE SEQUENCE `+fullSequenceName)
+		}
+		sqls = append(sqls, baseSQL+` SET DEFAULT nextval('`+fullSequenceName+`')`)
+
+		// Update table comment with sequence info
+		tableInfo.Sequence = fullSequenceName
+		tableInfoChanged = true
+
+	} else if oldColumn.AutoIncrement && !column.AutoIncrement {
+		// Removing AUTO_INCREMENT
+		sqls = append(sqls, baseSQL+` DROP DEFAULT`)
+
+		// https://github.com/duckdb/duckdb/issues/15399
+		// sqls = append(sqls, `DROP SEQUENCE IF EXISTS `+t.comment.Meta.Sequence)
+
+		// Update table comment to remove sequence info
+		tableInfo.Sequence = ""
+		tableInfoChanged = true
+	}
+
+	// Handle column rename
 	if columnName != column.Name {
-		sqls = append(sqls, fmt.Sprintf(`ALTER TABLE %s RENAME "%s" TO "%s"`, FullTableName(t.db.catalog, t.db.name, t.name), columnName, column.Name))
+		sqls = append(sqls, `ALTER TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` RENAME `+QuoteIdentifierANSI(columnName)+` TO `+QuoteIdentifierANSI(column.Name))
 	}
 
-	// alter comment
+	// Update column comment
 	comment := NewCommentWithMeta(column.Comment, typ.mysql)
-	sqls = append(sqls, fmt.Sprintf(`COMMENT ON COLUMN %s IS '%s'`, FullColumnName(t.db.catalog, t.db.name, t.name, column.Name), comment.Encode()))
+	sqls = append(sqls, `COMMENT ON COLUMN `+FullColumnName(t.db.catalog, t.db.name, t.name, column.Name)+` IS '`+comment.Encode()+`'`)
+
+	// Handle PRIMARY KEY changes
+	if !oldColumn.PrimaryKey && column.PrimaryKey {
+		// Adding PRIMARY KEY
+		// This feature will be available in DuckDB 1.2.0:
+		// https://github.com/duckdb/duckdb/pull/14419
+		sqls = append(sqls, `ALTER TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` ADD PRIMARY KEY (`+QuoteIdentifierANSI(column.Name)+`)`)
+
+		// Update table comment with PK ordinals
+		tableInfo.PkOrdinals = []int{oldColumnIndex}
+		tableInfoChanged = true
+
+	} else if oldColumn.PrimaryKey && !column.PrimaryKey {
+		// Remove PRIMARY KEY?
+	}
+
+	if tableInfoChanged {
+		comment := NewCommentWithMeta(t.comment.Text, tableInfo)
+		sqls = append(sqls, `COMMENT ON TABLE `+FullTableName(t.db.catalog, t.db.name, t.name)+` IS '`+comment.Encode()+`'`)
+	}
 
 	joinedSQL := strings.Join(sqls, "; ")
 	_, err = adapter.Exec(ctx, joinedSQL)
 	if err != nil {
-		logrus.Errorf("run duckdb sql failed: %s", joinedSQL)
+		ctx.GetLogger().WithError(err).Errorf("Failed to execute DuckDB SQL: %s", joinedSQL)
 		return ErrDuckDB.New(err)
 	}
 
-	return nil
+	// Update table metadata
+	if column.PrimaryKey {
+		t.comment.Meta.PkOrdinals = []int{oldColumnIndex}
+	}
+	if !oldColumn.AutoIncrement && column.AutoIncrement {
+		t.comment.Meta.Sequence = fullSequenceName
+	} else if oldColumn.AutoIncrement && !column.AutoIncrement {
+		t.comment.Meta.Sequence = ""
+	}
+
+	return t.withSchema(ctx)
 }
 
 type EmptyTableEditor struct {
@@ -396,9 +582,9 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 	}
 
 	// Construct the SQL statement for creating the index
-	var sqlsBuilder strings.Builder
-	sqlsBuilder.WriteString(fmt.Sprintf(`USE %s; `, FullSchemaName(t.db.catalog, "")))
-	sqlsBuilder.WriteString(fmt.Sprintf(`CREATE %s INDEX "%s" ON %s (%s)`,
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(`USE %s; `, FullSchemaName(t.db.catalog, "")))
+	b.WriteString(fmt.Sprintf(`CREATE %s INDEX "%s" ON %s (%s)`,
 		unique,
 		EncodeIndexName(t.name, indexDef.Name),
 		FullTableName("", t.db.name, t.name),
@@ -406,13 +592,13 @@ func (t *Table) CreateIndex(ctx *sql.Context, indexDef sql.IndexDef) error {
 
 	// Add the index comment if provided
 	if indexDef.Comment != "" {
-		sqlsBuilder.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS '%s'",
+		b.WriteString(fmt.Sprintf("; COMMENT ON INDEX %s IS '%s'",
 			FullIndexName(t.db.catalog, t.db.name, EncodeIndexName(t.name, indexDef.Name)),
 			NewComment[any](indexDef.Comment).Encode()))
 	}
 
 	// Execute the SQL statement to create the index
-	_, err := adapter.Exec(ctx, sqlsBuilder.String())
+	_, err := adapter.Exec(ctx, b.String())
 	if err != nil {
 		if IsDuckDBIndexAlreadyExistsError(err) {
 			return sql.ErrDuplicateKey.New(indexDef.Name)
@@ -547,7 +733,7 @@ func queryColumns(ctx *sql.Context, catalogName, schemaName, tableName string) (
 	}
 	defer rows.Close()
 
-	var columnsInfo []*ColumnInfo
+	var columns []*ColumnInfo
 
 	for rows.Next() {
 		var columnName, dataTypes string
@@ -571,14 +757,14 @@ func queryColumns(ctx *sql.Context, catalogName, schemaName, tableName string) (
 			ColumnDefault: columnDefault,
 			Comment:       comment,
 		}
-		columnsInfo = append(columnsInfo, columnInfo)
+		columns = append(columns, columnInfo)
 	}
 
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return columnsInfo, nil
+	return columns, nil
 }
 
 func (t *IndexedTable) LookupPartitions(ctx *sql.Context, lookup sql.IndexLookup) (sql.PartitionIter, error) {
