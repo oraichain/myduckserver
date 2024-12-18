@@ -19,12 +19,12 @@
   - [Installation](#installation)
   - [Usage](#usage)
   - [Replicating Data](#replicating-data)
-  - [Initialize MyDuck Server with Custom SQLs](#initialize-myduck-server-with-custom-sqls)
   - [Connecting to Cloud MySQL & Postgres](#connecting-to-cloud-mysql--postgres)
   - [HTAP Setup](#htap-setup)
+  - [Customizing the Docker Container](#customizing-the-docker-container)
   - [Query Parquet Files](#query-parquet-files)
   - [Already Using DuckDB?](#already-using-duckdb)
-  - [Backup and Restore via Object Storage](#backup-and-restore-via-object-storage)
+  - [Backup and Restore with Object Storage](#backup-and-restore-with-object-storage)
   - [LLM Integration](#llm-integration)
   - [Access from Python](#access-from-python)
 - [Roadmap](#-roadmap)
@@ -148,19 +148,6 @@ docker run -d --name myduck \
 > [!NOTE]
 > To replicate from a server running on the host machine, use `host.docker.internal` as the hostname instead of `localhost` or `127.0.0.1`. On Linux, you must also add `--add-host=host.docker.internal:host-gateway` to the `docker run` command.
 
-### Initialize MyDuck Server with Custom SQLs
-
-To initialize MyDuck Server by executing custom SQL statements once it’s ready, you can place the SQL statements in a file with the .sql extension and mount the file to either `/docker-entrypoint-initdb.d/mysql/` or `/docker-entrypoint-initdb.d/postgres/` in the Docker container. The choice between these directories depends on the protocol used for executing the SQL statements.
-
-For instance:
-```bash
-# Execute init.sql on MySQL protocol
-docker run -d -p 13306:3306 -p 15432:5432 --name=myduck -v ./init.sql:/docker-entrypoint-initdb.d/mysql/init.sql apecloud/myduckserver:latest
-
-# Execute init.sql on PostgreSQL protocol
-docker run -d -p 13306:3306 -p 15432:5432 --name=myduck -v ./init.sql:/docker-entrypoint-initdb.d/postgres/init.sql apecloud/myduckserver:latest
-```
-
 ### Connecting to Cloud MySQL & Postgres
 
 MyDuck Server supports setting up replicas from common cloud-based MySQL & Postgres offerings. For more information, please refer to the [replica setup guide](docs/tutorial/replica-setup-rds.md).
@@ -171,6 +158,19 @@ With MyDuck's powerful analytics capabilities, you can create an hybrid transact
 * Provisioning a MySQL HTAP cluster based on [ProxySQL](docs/tutorial/mysql-htap-proxysql-setup.md) or [MariaDB MaxScale](docs/tutorial/mysql-htap-maxscale-setup.md).
 * Provisioning a PostgreSQL HTAP cluster based on [PGPool-II](docs/tutorial/pg-htap-pgpool-setup.md)
 
+### Customizing the Docker Container
+
+To initialize MyDuck Server with custom SQL statements, mount your `.sql` file to either `/docker-entrypoint-initdb.d/mysql/` or `/docker-entrypoint-initdb.d/postgres/` inside the Docker container, depending on the SQL dialect you're using.
+
+For example:
+```bash
+# Execute `init.sql` via MySQL protocol
+docker run -d -p 13306:3306 --name=myduck -v ./init.sql:/docker-entrypoint-initdb.d/mysql/init.sql apecloud/myduckserver:latest
+
+# Execute `init.sql` via PostgreSQL protocol
+docker run -d -p 15432:5432 --name=myduck -v ./init.sql:/docker-entrypoint-initdb.d/postgres/init.sql apecloud/myduckserver:latest
+```
+
 ### Query Parquet Files
 
 Looking to load Parquet files into MyDuck Server and start querying? Follow our [Parquet file loading guide](docs/tutorial/load-parquet-files.md) for easy setup.
@@ -179,8 +179,9 @@ Looking to load Parquet files into MyDuck Server and start querying? Follow our 
 
 Already have a DuckDB file? You can seamlessly bootstrap MyDuck Server with it. See our [DuckDB file bootstrapping guide](docs/tutorial/bootstrap.md) for more details.
 
-### Backup and Restore via Object Storage
-If you want to backup and restore your MyDuck Server database to/from object storage, follow our [backup and restore guide](docs/tutorial/backup-restore.md) for detailed instructions.
+### Backup and Restore with Object Storage
+
+To back up and restore your MyDuck Server database using object storage, refer to our [backup and restore guide](docs/tutorial/backup-restore.md) for detailed instructions.
 
 ### LLM Integration
 
@@ -194,8 +195,7 @@ MyDuck Server can be seamlessly accessed from the Python data science ecosystem.
 
 We have big plans for MyDuck Server! Here are some of the features we’re working on:
 
-- [x] Be compatible with MySQL proxy tools like [ProxySQL](https://proxysql.com/).
-- [x] Replicate data from PostgreSQL.
+- [ ] Multiple DB.
 - [ ] Authentication.
 - [ ] ...and more! We’re always looking for ways to make MyDuck Server better. If you have a feature request, please let us know by [opening an issue](https://github.com/apecloud/myduckserver/issues/new).
 
