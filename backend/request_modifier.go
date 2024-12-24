@@ -6,7 +6,9 @@ import "strings"
 type RequestModifier func(string, *[]ResultModifier) string
 
 // default request modifier list
-var defaultRequestModifiers = []RequestModifier{}
+var defaultRequestModifiers = []RequestModifier{
+	replaceMariaDBCollation,
+}
 
 // Newer MariaDB versions use utf8mb4_uca1400_ai_ci as the default collation,
 // which is not supported by go-mysql-server.
