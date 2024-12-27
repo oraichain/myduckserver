@@ -35,12 +35,6 @@ jobs:
         with:
           python-version: '3.13'
       
-      - name: Install system packages
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: libnsl2 # required by MySQL Shell
-          version: 1.1
-
       - name: Install dependencies
         run: |
           go get .
@@ -48,7 +42,7 @@ jobs:
           pip3 install "sqlglot[rs]"
 
           curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell_9.1.0-1debian12_amd64.deb
-          sudo dpkg -i ./mysql-shell_9.1.0-1debian12_amd64.deb
+          sudo apt-get install -y ./mysql-shell_9.1.0-1debian12_amd64.deb
 
       - name: Setup test data in source MySQL
         run: |
@@ -67,10 +61,11 @@ jobs:
             -- A table with non-default starting auto_increment value
             CREATE TABLE items (
               id INT AUTO_INCREMENT PRIMARY KEY,
+              v BIGINT check (v > 0),
               name VARCHAR(100)
             ) AUTO_INCREMENT=1000;
 
-            INSERT INTO items (name) VALUES ('item1'), ('item2'), ('item3');
+            INSERT INTO items (v, name) VALUES (1, 'item1'), (2, 'item2'), (3, 'item3');
           "
 
       - name: Build and start MyDuck Server
