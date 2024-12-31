@@ -14,7 +14,6 @@ import (
 
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/marcboeker/go-duckdb"
-	_ "github.com/marcboeker/go-duckdb"
 
 	"github.com/apecloud/myduckserver/adapter"
 	"github.com/apecloud/myduckserver/configuration"
@@ -27,7 +26,7 @@ type DatabaseProvider struct {
 	connector                 *duckdb.Connector
 	storage                   *stdsql.DB
 	pool                      *ConnectionPool
-	catalogName               string // database name in postgres
+	defaultCatalogName        string // default database name in postgres
 	dataDir                   string
 	dbFile                    string
 	dsn                       string
@@ -60,11 +59,11 @@ func NewDBProvider(defaultTimeZone, dataDir, defaultDB string) (prov *DatabasePr
 
 	shouldInit := true
 	if defaultDB == "" || defaultDB == "memory" {
-		prov.catalogName = "memory"
+		prov.defaultCatalogName = "memory"
 		prov.dbFile = ""
 		prov.dsn = ""
 	} else {
-		prov.catalogName = defaultDB
+		prov.defaultCatalogName = defaultDB
 		prov.dbFile = defaultDB + ".db"
 		prov.dsn = filepath.Join(prov.dataDir, prov.dbFile)
 		_, err = os.Stat(prov.dsn)
@@ -76,7 +75,7 @@ func NewDBProvider(defaultTimeZone, dataDir, defaultDB string) (prov *DatabasePr
 		return nil, err
 	}
 	prov.storage = stdsql.OpenDB(prov.connector)
-	prov.pool = NewConnectionPool(prov.catalogName, prov.connector, prov.storage)
+	prov.pool = NewConnectionPool(prov.connector, prov.storage)
 
 	bootQueries := []string{
 		"INSTALL arrow",
@@ -353,8 +352,8 @@ func (prov *DatabaseProvider) Pool() *ConnectionPool {
 	return prov.pool
 }
 
-func (prov *DatabaseProvider) CatalogName() string {
-	return prov.catalogName
+func (prov *DatabaseProvider) DefaultCatalogName() string {
+	return prov.defaultCatalogName
 }
 
 func (prov *DatabaseProvider) DataDir() string {
@@ -380,7 +379,8 @@ func (prov *DatabaseProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	rows, err := adapter.QueryCatalog(ctx, "SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", prov.catalogName)
+	catalogName := adapter.GetCurrentCatalog(ctx)
+	rows, err := adapter.QueryCatalog(ctx, "SELECT DISTINCT schema_name FROM information_schema.schemata WHERE catalog_name = ?", catalogName)
 	if err != nil {
 		panic(ErrDuckDB.New(err))
 	}
@@ -398,7 +398,7 @@ func (prov *DatabaseProvider) AllDatabases(ctx *sql.Context) []sql.Database {
 			continue
 		}
 
-		all = append(all, NewDatabase(schemaName, prov.catalogName))
+		all = append(all, NewDatabase(schemaName, catalogName))
 	}
 
 	sort.Slice(all, func(i, j int) bool {
@@ -413,13 +413,14 @@ func (prov *DatabaseProvider) Database(ctx *sql.Context, name string) (sql.Datab
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(ctx, prov.catalogName, name)
+	catalogName := adapter.GetCurrentCatalog(ctx)
+	ok, err := hasDatabase(ctx, catalogName, name)
 	if err != nil {
 		return nil, err
 	}
 
 	if ok {
-		return NewDatabase(name, prov.catalogName), nil
+		return NewDatabase(name, catalogName), nil
 	}
 	return nil, sql.ErrDatabaseNotFound.New(name)
 }
@@ -429,7 +430,7 @@ func (prov *DatabaseProvider) HasDatabase(ctx *sql.Context, name string) bool {
 	prov.mu.RLock()
 	defer prov.mu.RUnlock()
 
-	ok, err := hasDatabase(ctx, prov.catalogName, name)
+	ok, err := hasDatabase(ctx, adapter.GetCurrentCatalog(ctx), name)
 	if err != nil {
 		panic(err)
 	}
@@ -451,7 +452,8 @@ func (prov *DatabaseProvider) CreateDatabase(ctx *sql.Context, name string) erro
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := adapter.ExecCatalog(ctx, fmt.Sprintf(`CREATE SCHEMA %s`, FullSchemaName(prov.catalogName, name)))
+	_, err := adapter.ExecCatalog(ctx, fmt.Sprintf(`CREATE SCHEMA %s`,
+		FullSchemaName(adapter.GetCurrentCatalog(ctx), name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -464,7 +466,8 @@ func (prov *DatabaseProvider) DropDatabase(ctx *sql.Context, name string) error 
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 
-	_, err := adapter.Exec(ctx, fmt.Sprintf(`DROP SCHEMA %s CASCADE`, FullSchemaName(prov.catalogName, name)))
+	_, err := adapter.Exec(ctx, fmt.Sprintf(`DROP SCHEMA %s CASCADE`,
+		FullSchemaName(adapter.GetCurrentCatalog(ctx), name)))
 	if err != nil {
 		return ErrDuckDB.New(err)
 	}
@@ -494,5 +497,5 @@ func (prov *DatabaseProvider) Restart(readOnly bool) error {
 	prov.connector = connector
 	prov.storage = storage
 
-	return nil
+	return prov.pool.Reset(connector, storage)
 }
