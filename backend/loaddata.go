@@ -123,7 +123,7 @@ func (db *DuckBuilder) executeLoadData(ctx *sql.Context, insert *plan.InsertInto
 			// Replicated tables do not have physical primary keys.
 			// Their logical primary keys are fake and should not be used in INSERT INTO statements.
 			// https://github.com/apecloud/myduckserver/issues/272
-			keyless = t.ExtraTableInfo().Replicated
+			keyless = t.ExtraTableInfo().Replicated || !t.HasPrimaryKey()
 		}
 	}
 
