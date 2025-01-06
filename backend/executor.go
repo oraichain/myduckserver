@@ -170,9 +170,12 @@ func (b *DuckBuilder) executeQuery(ctx *sql.Context, n sql.Node, conn *stdsql.Co
 	)
 
 	// Translate the MySQL query to a DuckDB query
-	switch n.(type) {
+	switch n := n.(type) {
 	case *plan.ShowTables:
 		duckSQL = ctx.Query()
+	case *plan.ResolvedTable:
+		// SQLGlot cannot translate MySQL's `TABLE t` into DuckDB's `FROM t` - it produces `"table" AS t` instead. 
+		duckSQL = `FROM ` + catalog.ConnectIdentifiersANSI(n.Database().Name(), n.Name())
 	default:
 		duckSQL, err = transpiler.TranslateWithSQLGlot(ctx.Query())
 	}
