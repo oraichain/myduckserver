@@ -271,18 +271,229 @@ var (
 // get the regex to match any table in pg_catalog in the query.
 func getPgCatalogRegex() *regexp.Regexp {
 	initPgCatalogRegex.Do(func() {
-		var tableNames []string
+		var internalNames []string
 		for _, table := range catalog.GetInternalTables() {
 			if table.Schema != "__sys__" {
 				continue
 			}
-			tableNames = append(tableNames, table.Name)
+			internalNames = append(internalNames, table.Name)
 		}
-		pgCatalogRegex = regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO)\s+(?:pg_catalog\.)?(` + strings.Join(tableNames, "|") + `)`)
+		for _, view := range catalog.InternalViews {
+			if view.Schema != "__sys__" {
+				continue
+			}
+			internalNames = append(internalNames, view.Name)
+		}
+		pgCatalogRegex = regexp.MustCompile(
+			`(?i)\b(FROM|JOIN|INTO)\s+(?:pg_catalog\.)?(?:"?(` + strings.Join(internalNames, "|") + `)"?)`)
 	})
 	return pgCatalogRegex
 }
 
 func ConvertToSys(sql string) string {
 	return getPgCatalogRegex().ReplaceAllString(RemoveComments(sql), "$1 __sys__.$2")
+}
+
+var (
+	typeCastRegex     *regexp.Regexp
+	initTypeCastRegex sync.Once
+)
+
+// The Key must be in lowercase. Because the key used for value retrieval is in lowercase.
+var typeCastConversion = map[string]string{
+	"::regclass": "::varchar",
+}
+
+// This function will return a regex that matches all type casts in the query.
+func getTypeCastRegex() *regexp.Regexp {
+	initTypeCastRegex.Do(func() {
+		var typeCasts []string
+		for typeCast := range typeCastConversion {
+			typeCasts = append(typeCasts, regexp.QuoteMeta(typeCast))
+		}
+		typeCastRegex = regexp.MustCompile(`(?i)(` + strings.Join(typeCasts, "|") + `)`)
+	})
+	return typeCastRegex
+}
+
+// This function will replace all type casts in the query with the corresponding type cast in the typeCastConversion map.
+func ConvertTypeCast(sql string) string {
+	return getTypeCastRegex().ReplaceAllStringFunc(sql, func(m string) string {
+		return typeCastConversion[strings.ToLower(m)]
+	})
+}
+
+var (
+	renameMacroRegex     *regexp.Regexp
+	initRenameMacroRegex sync.Once
+	macroRegex           *regexp.Regexp
+	initMacroRegex       sync.Once
+)
+
+// This function will return a regex that matches all function names
+// in the list of InternalMacros. And they will have optional "pg_catalog." prefix.
+// However, if the schema is not "pg_catalog", it will not be matched.
+// e.g.
+// SELECT pg_catalog.abc(123, 'test') AS result1,
+//
+//	defg('hello', world) AS result2,
+//	user.abc(1) AS result3,
+//	pg_catalog.xyz(456) AS result4
+//
+// FROM my_table;
+// If the function names in the list of InternalMacros are "pg_catalog.abc" and "pg_catalog.defg",
+// Then the matched function names will be "pg_catalog.abc" and "defg".
+// The "user.abc" and "pg_catalog.xyz" will not be matched. Because for "user.abc", the schema is "user" and for
+// "pg_catalog.xyz", the function name is "xyz".
+func getRenamePgCatalogFuncRegex() *regexp.Regexp {
+	initRenameMacroRegex.Do(func() {
+		var internalNames []string
+		for _, view := range catalog.InternalMacros {
+			if strings.ToLower(view.Schema) != "pg_catalog" {
+				continue
+			}
+			// Quote the function name to ensure safe regex usage
+			internalNames = append(internalNames, regexp.QuoteMeta(view.Name))
+		}
+
+		namesAlt := strings.Join(internalNames, "|")
+
+		// Compile the regex
+		// The pattern matches:
+		// - Branch A: "pg_catalog.<funcName>("
+		// - Branch B: "<funcName>(" without a preceding "."
+		pattern := `(?i)(?:pg_catalog\.("?(?:` + namesAlt + `)"?)\(|(^|[^\.])("?(?:` + namesAlt + `)"?)\()`
+		renameMacroRegex = regexp.MustCompile(pattern)
+	})
+	return renameMacroRegex
+}
+
+// Replaces all matching function names in the query with "__sys__.<funcName>".
+// e.g.
+// SELECT pg_catalog.abc(123, 'test') AS result1,
+//
+//	defg('hello', world) AS result2,
+//	user.abc(1) AS result3,
+//	pg_catalog.xyz(456) AS result4
+//
+// If the function names in the list of InternalMacros are "pg_catalog.abc" and "pg_catalog.defg".
+// After the replacement, the query will be:
+// SELECT __sys__.abc(123, 'test') AS result1,
+//
+//	__sys__.defg('hello', world) AS result2,
+//	user.abc(1) AS result3,
+//	pg_catalog.xyz(456) AS result4
+func ConvertPgCatalogFuncToSys(sql string) string {
+	re := getRenamePgCatalogFuncRegex()
+	return re.ReplaceAllStringFunc(sql, func(m string) string {
+		sub := re.FindStringSubmatch(m)
+		// sub[1]  => Function name from branch A (pg_catalog.<func>)
+		// sub[2]  => Matches from branch B (^|[^.]), not the function name
+		// sub[3]  => Function name from branch B
+		var funcName string
+		if sub[1] != "" {
+			// Matched branch A
+			funcName = sub[1]
+		} else {
+			// Matched branch B
+			funcName = sub[3]
+		}
+		// Return __sys__.<funcName>(
+		return "__sys__." + funcName + "("
+	})
+}
+
+// This function will return a regex that matches all function names
+// in the list of InternalMacros. And the Macro must be a table macro.
+// e.g.
+//
+// * A scalar macro:
+// CREATE OR REPLACE MACRO udf.mul
+//
+//	(a, b) AS a * b,
+//	(a, b, c) AS a * b * c;
+//
+// * A table macro:
+// CREATE OR REPLACE MACRO information_schema._pg_expandarray(a) AS TABLE
+// SELECT STRUCT_PACK(
+//
+//	x := unnest(a),
+//	n := generate_series(1, array_length(a))
+//
+// ) AS item;
+//
+// SQL string:
+// SELECT
+//
+//	(information_schema._pg_expandarray(my_key_indexes)).x,
+//	information_schema._pg_expandarray(my_col_indexes),
+//	udf.mul(a, b, c)
+//
+// FROM my_table;
+//
+// Then the matched function names will be "information_schema._pg_expandarray".
+// The "udf.mul" will not be matched. Because it is a scalar macro.
+func getPgFuncRegex() *regexp.Regexp {
+	initMacroRegex.Do(func() {
+		// Collect the fully qualified names of all macros.
+		var macroPatterns []string
+		for _, macro := range catalog.InternalMacros {
+			if macro.IsTableMacro {
+				qualified := regexp.QuoteMeta(macro.QualifiedName())
+				macroPatterns = append(macroPatterns, qualified)
+			}
+		}
+
+		// Build the regular expression:
+		// (\(*) - Captures leading parentheses.
+		// (schema.name\s*\([^)]*\)) - Captures the macro invocation itself.
+		// (\)*) - Captures trailing parentheses.
+		pattern := `(?i)(\(*)(\b(?:` + strings.Join(macroPatterns, "|") + `)\([^)]*\))(\)*)`
+		macroRegex = regexp.MustCompile(pattern)
+	})
+	return macroRegex
+}
+
+// Wraps all table macro calls in "(FROM ...)".
+// e.g.
+// If the function names in the list of InternalMacros are "information_schema._pg_expandarray"(Table Macro)
+// and "udf.mul"(Scalar Macro).
+//
+// For the SQL string:
+// SELECT
+//
+//	(information_schema._pg_expandarray(my_key_indexes)).x,
+//	information_schema._pg_expandarray(my_col_indexes),
+//	udf.mul(a, b, c)
+//
+// FROM my_table;
+//
+// After the replacement, the query will be:
+// SELECT
+//
+//	(FROM information_schema._pg_expandarray(my_key_indexes)).x,
+//	(FROM information_schema._pg_expandarray(my_col_indexes)),
+//	udf.mul(a, b, c)
+//
+// FROM my_table;
+func ConvertToDuckDBMacro(sql string) string {
+	return getPgFuncRegex().ReplaceAllStringFunc(sql, func(match string) string {
+		// Split the match into components using the regex's capturing groups.
+		parts := getPgFuncRegex().FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match // Return the original match if it doesn't conform to the expected structure.
+		}
+
+		leftParens := parts[1]  // Leading parentheses.
+		macroCall := parts[2]   // The macro invocation.
+		rightParens := parts[3] // Trailing parentheses.
+
+		// If the macro call is already wrapped in "(FROM ...)", skip wrapping it again.
+		if strings.HasPrefix(macroCall, "(FROM ") {
+			return match
+		}
+
+		// Wrap the macro call in "(FROM ...)" and preserve surrounding parentheses.
+		return leftParens + "(FROM " + macroCall + ")" + rightParens
+	})
 }

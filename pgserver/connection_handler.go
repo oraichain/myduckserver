@@ -96,7 +96,7 @@ func NewConnectionHandler(conn net.Conn, handler mysql.Handler, engine *gms.Engi
 		encodeLoggedQuery: false, // cfg.EncodeLoggedQuery,
 	}
 
-	return &ConnectionHandler{
+	connectionHandler := ConnectionHandler{
 		mysqlConn:          mysqlConn,
 		preparedStatements: preparedStatements,
 		portals:            portals,
@@ -110,6 +110,8 @@ func NewConnectionHandler(conn net.Conn, handler mysql.Handler, engine *gms.Engi
 			"protocol":     "pg",
 		}),
 	}
+	connectionHandler.duckHandler.SetConnectionHandler(&connectionHandler)
+	return &connectionHandler
 }
 
 func (h *ConnectionHandler) closeBackendConn() {
@@ -479,6 +481,7 @@ func (h *ConnectionHandler) handleQuery(message *pgproto3.Query) (endOfMessages 
 	h.deletePortal("")
 
 	for _, statement := range statements {
+		statement.IsExtendedQuery = false
 		// Certain statement types get handled directly by the handler instead of being passed to the engine
 		handled, endOfMessages, err = h.handleStatementOutsideEngine(statement)
 		if handled {
@@ -548,7 +551,7 @@ func (h *ConnectionHandler) handleStatementOutsideEngine(statement ConvertedStat
 		}
 	}
 
-	handled, err = h.handlePgCatalogQueries(statement)
+	handled, err = h.handleInPlaceQueries(statement)
 	if handled || err != nil {
 		return true, true, err
 	}
@@ -568,15 +571,16 @@ func (h *ConnectionHandler) handleParse(message *pgproto3.Parse) error {
 
 	// TODO(Noy): handle multiple statements
 	statement := statements[0]
-	if statement.AST == nil {
+	statement.IsExtendedQuery = true
+	if statement.AST == nil && strings.TrimSpace(statement.String) == "" {
 		// special case: empty query
 		h.preparedStatements[message.Name] = PreparedStatementData{
 			Statement: statement,
 		}
-		return nil
+		return h.send(&pgproto3.ParseComplete{})
 	}
 
-	handledOutsideEngine, err := shouldQueryBeHandledInPlace(statement)
+	handledOutsideEngine, err := shouldQueryBeHandledInPlace(h, &statement)
 	if err != nil {
 		return err
 	}
@@ -666,6 +670,10 @@ func (h *ConnectionHandler) handleDescribe(message *pgproto3.Describe) error {
 		if portalData.Stmt != nil {
 			fields = portalData.Fields
 			tag = portalData.Statement.Tag
+		} else {
+			// The RowDescription message will be sent by the inplace handler if this statement
+			// is intercepted internally.
+			return nil
 		}
 	}
 
@@ -686,10 +694,11 @@ func (h *ConnectionHandler) handleBind(message *pgproto3.Bind) error {
 
 	if preparedData.Stmt == nil {
 		h.portals[message.DestinationPortal] = PortalData{
-			Statement: preparedData.Statement,
-			Fields:    nil,
-			Stmt:      nil,
-			Vars:      nil,
+			Statement:    preparedData.Statement,
+			IsEmptyQuery: strings.TrimSpace(preparedData.Statement.String) == "",
+			Fields:       nil,
+			Stmt:         nil,
+			Vars:         nil,
 		}
 		return h.send(&pgproto3.BindComplete{})
 	}
@@ -738,20 +747,26 @@ func (h *ConnectionHandler) handleExecute(message *pgproto3.Execute) error {
 	query := portalData.Statement
 
 	if portalData.IsEmptyQuery {
+		err := h.send(&pgproto3.NoData{})
+		if err != nil {
+			return fmt.Errorf("error sending NoData message: %w", err)
+		}
 		return h.send(&pgproto3.EmptyQueryResponse{})
 	}
 
 	// Certain statement types get handled directly by the handler instead of being passed to the engine
-	handled, _, err := h.handleStatementOutsideEngine(query)
-	if handled {
-		return err
+	if strings.ToUpper(query.Tag) != "SELECT" || portalData.Stmt == nil {
+		handled, _, err := h.handleStatementOutsideEngine(query)
+		if handled {
+			return err
+		}
 	}
 
 	// |rowsAffected| gets altered by the callback below
 	rowsAffected := int32(0)
 
 	callback := h.spoolRowsCallback(query, &rowsAffected, true)
-	err = h.duckHandler.ComExecuteBound(context.Background(), h.mysqlConn, portalData, callback)
+	err := h.duckHandler.ComExecuteBound(context.Background(), h.mysqlConn, portalData, callback)
 	if err != nil {
 		return err
 	}

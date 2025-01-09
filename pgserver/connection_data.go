@@ -58,9 +58,24 @@ type ConvertedStatement struct {
 	Tag                string
 	PgParsable         bool
 	HasSentRowDesc     bool
+	IsExtendedQuery    bool
 	SubscriptionConfig *SubscriptionConfig
 	BackupConfig       *BackupConfig
 	RestoreConfig      *RestoreConfig
+}
+
+func (cs ConvertedStatement) WithQueryString(queryString string) ConvertedStatement {
+	return ConvertedStatement{
+		String:             queryString,
+		AST:                cs.AST,
+		Tag:                cs.Tag,
+		PgParsable:         cs.PgParsable,
+		HasSentRowDesc:     cs.HasSentRowDesc,
+		IsExtendedQuery:    cs.IsExtendedQuery,
+		SubscriptionConfig: cs.SubscriptionConfig,
+		BackupConfig:       cs.BackupConfig,
+		RestoreConfig:      cs.RestoreConfig,
+	}
 }
 
 // copyFromStdinState tracks the metadata for an import of data into a table using a COPY FROM STDIN statement. When
