@@ -7,6 +7,13 @@ type MacroDefinition struct {
 	DDL    string
 }
 
+var (
+	SchemaNameSYS           string = "__sys__"
+	MacroNameMyListContains string = "my_list_contains"
+
+	MacroNameMySplitListStr string = "my_split_list_str"
+)
+
 type InternalMacro struct {
 	Schema       string
 	Name         string
@@ -52,6 +59,50 @@ var InternalMacros = []InternalMacro{
 				Params: []string{"index_oid", "column_no", "pretty_bool"},
 				// Do nothing currently
 				DDL: `''`,
+			},
+		},
+	},
+	{
+		Schema:       "pg_catalog",
+		Name:         "pg_get_expr",
+		IsTableMacro: false,
+		Definitions: []MacroDefinition{
+			{
+				Params: []string{"pg_node_tree", "relation_oid"},
+				// Do nothing currently
+				DDL: `pg_catalog.pg_get_expr(pg_node_tree, relation_oid)`,
+			},
+			{
+				Params: []string{"pg_node_tree", "relation_oid", "pretty_bool"},
+				// Do nothing currently
+				DDL: `pg_catalog.pg_get_expr(pg_node_tree, relation_oid)`,
+			},
+		},
+	},
+	{
+		Schema:       SchemaNameSYS,
+		Name:         MacroNameMyListContains,
+		IsTableMacro: false,
+		Definitions: []MacroDefinition{
+			{
+				Params: []string{"l", "v"},
+				DDL: `CASE
+    WHEN typeof(l) = 'VARCHAR' THEN
+        list_contains(regexp_split_to_array(l::VARCHAR, '[{},\s]+'), v)
+    ELSE
+        list_contains(l::text[], v)
+    END`,
+			},
+		},
+	},
+	{
+		Schema:       SchemaNameSYS,
+		Name:         MacroNameMySplitListStr,
+		IsTableMacro: false,
+		Definitions: []MacroDefinition{
+			{
+				Params: []string{"l"},
+				DDL:    `regexp_split_to_array(l::VARCHAR, '[{},\s]+')`,
 			},
 		},
 	},
