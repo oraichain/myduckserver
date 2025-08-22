@@ -326,6 +326,8 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 		return types.CreateEnumType(duckType.mysql.Values, collation)
 	case "SET":
 		return types.CreateSetType(duckType.mysql.Values, collation)
+	case "BOOLEAN":
+		return types.Boolean, nil
 	default:
 		return nil, fmt.Errorf("encountered unknown DuckDB type(%v)", duckType)
 	}
