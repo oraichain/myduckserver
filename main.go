@@ -71,6 +71,9 @@ var (
 
 	flightsqlHost = "localhost"
 	flightsqlPort = -1 // Disabled by default
+
+	httpServerPort   = 9999
+	httpServerSecret = "secretkey"
 )
 
 func init() {
@@ -100,6 +103,9 @@ func init() {
 
 	flag.StringVar(&flightsqlHost, "flightsql-host", flightsqlHost, "hostname for the Flight SQL service")
 	flag.IntVar(&flightsqlPort, "flightsql-port", flightsqlPort, "port number for the Flight SQL service")
+
+	flag.IntVar(&httpServerPort, "http-server-port", httpServerPort, "The port start the HTTP server extension.")
+	flag.StringVar(&httpServerSecret, "http-server-secret", httpServerSecret, "The secretkey to support the authentication (Basic Auth or X-Token).")
 }
 
 func ensureSQLTranslate() {
@@ -123,12 +129,12 @@ func main() {
 	executeRestoreIfNeeded()
 
 	if initMode {
-		provider := catalog.NewInMemoryDBProvider()
+		provider := catalog.NewInMemoryDBProvider(httpServerPort, httpServerSecret)
 		provider.Close()
 		return
 	}
 
-	provider, err := catalog.NewDBProvider(defaultTimeZone, dataDirectory, defaultDb)
+	provider, err := catalog.NewDBProvider(defaultTimeZone, dataDirectory, defaultDb, httpServerPort, httpServerSecret)
 	if err != nil {
 		logrus.Fatalln("Failed to open the database:", err)
 	}

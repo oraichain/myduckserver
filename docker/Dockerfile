@@ -18,16 +18,16 @@ RUN apt-get update && \
 # Download MySQL Shell and DuckDB CLI in builder stage
 RUN mkdir -p /downloads && cd /downloads && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-        curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell-9.1.0-linux-glibc2.28-arm-64bit.tar.gz && \
-        tar -zxf mysql-shell-9.1.0-linux-glibc2.28-arm-64bit.tar.gz && \
-        mv mysql-shell-9.1.0-linux-glibc2.28-arm-64bit mysqlsh && \
-        touch mysql-shell.deb && \
-        ARCH="aarch64"; \
+    curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell-9.1.0-linux-glibc2.28-arm-64bit.tar.gz && \
+    tar -zxf mysql-shell-9.1.0-linux-glibc2.28-arm-64bit.tar.gz && \
+    mv mysql-shell-9.1.0-linux-glibc2.28-arm-64bit mysqlsh && \
+    touch mysql-shell.deb && \
+    ARCH="aarch64"; \
     else \
-        curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell_9.1.0-1debian12_amd64.deb && \
-        mv mysql-shell_9.1.0-1debian12_amd64.deb mysql-shell.deb && \
-        mkdir mysqlsh && \
-        ARCH="amd64"; \
+    curl -LJO https://dev.mysql.com/get/Downloads/MySQL-Shell/mysql-shell_9.1.0-1debian12_amd64.deb && \
+    mv mysql-shell_9.1.0-1debian12_amd64.deb mysql-shell.deb && \
+    mkdir mysqlsh && \
+    ARCH="amd64"; \
     fi && \
     curl -LJO https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-$ARCH.zip && \
     unzip duckdb_cli-linux-$ARCH.zip && \
@@ -45,13 +45,13 @@ RUN --mount=type=bind,target=. \
     --mount=type=cache,target=/go/pkg/mod \
     go env && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-      CC="aarch64-linux-gnu-gcc" CXX="aarch64-linux-gnu-g++" CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /myduckserver; \
+    CC="aarch64-linux-gnu-gcc" CXX="aarch64-linux-gnu-g++" CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /myduckserver; \
     else \
-      CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /myduckserver; \
+    CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /myduckserver; \
     fi
 
 # Step 2: Final stage
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG TARGETARCH
 
@@ -70,15 +70,15 @@ COPY --from=builder /downloads/mysqlsh /usr/local/mysqlsh.arm64
 COPY --from=builder /downloads/mysql-shell.deb /tmp/
 
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        mv /usr/local/mysqlsh.arm64 /usr/local/mysqlsh && \
-        ln -s /usr/local/mysqlsh/bin/mysqlsh /usr/local/bin/mysqlsh && \
-        rm -f /tmp/mysql-shell.deb; \
+    mv /usr/local/mysqlsh.arm64 /usr/local/mysqlsh && \
+    ln -s /usr/local/mysqlsh/bin/mysqlsh /usr/local/bin/mysqlsh && \
+    rm -f /tmp/mysql-shell.deb; \
     else \
-        apt-get update && \
-        apt-get install -y /tmp/mysql-shell.deb && \
-        rm /tmp/mysql-shell.deb && \
-        rm -rf /usr/local/mysqlsh.arm64 && \
-        rm -rf /var/lib/apt/lists/*; \
+    apt-get update && \
+    apt-get install -y /tmp/mysql-shell.deb && \
+    rm /tmp/mysql-shell.deb && \
+    rm -rf /usr/local/mysqlsh.arm64 && \
+    rm -rf /var/lib/apt/lists/*; \
     fi && \
     rm -f /usr/local/mysqlsh.arm64
 
@@ -101,4 +101,4 @@ COPY --chown=admin:admin --chmod=755 devtools/replica-setup-postgres ./replica-s
 RUN myduckserver --init
 
 EXPOSE 3306 5432
-ENTRYPOINT /home/admin/entrypoint.sh
+ENTRYPOINT ["/home/admin/entrypoint.sh"]

@@ -3,12 +3,13 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/sirupsen/logrus"
 
 	stdsql "database/sql"
 
@@ -41,15 +42,15 @@ var _ configuration.DataDirProvider = (*DatabaseProvider)(nil)
 
 const readOnlySuffix = "?access_mode=read_only"
 
-func NewInMemoryDBProvider() *DatabaseProvider {
-	prov, err := NewDBProvider("", ".", "")
+func NewInMemoryDBProvider(httpServerPort int, httpSeverSecret string) *DatabaseProvider {
+	prov, err := NewDBProvider("", ".", "", 0, "")
 	if err != nil {
 		panic(err)
 	}
 	return prov
 }
 
-func NewDBProvider(defaultTimeZone, dataDir, defaultDB string) (prov *DatabaseProvider, err error) {
+func NewDBProvider(defaultTimeZone, dataDir, defaultDB string, httpServerPort int, httpSeverSecret string) (prov *DatabaseProvider, err error) {
 	prov = &DatabaseProvider{
 		mu:                        &sync.RWMutex{},
 		defaultTimeZone:           defaultTimeZone,
@@ -81,6 +82,14 @@ func NewDBProvider(defaultTimeZone, dataDir, defaultDB string) (prov *DatabasePr
 		"LOAD icu",
 		"INSTALL postgres_scanner",
 		"LOAD postgres_scanner",
+	}
+
+	if httpServerPort > 0 {
+		bootQueries = append(bootQueries,
+			"INSTALL httpserver FROM community",
+			"LOAD httpserver",
+			fmt.Sprintf("SELECT httpserve_start('localhost', %d, '%s')", httpServerPort, httpSeverSecret),
+		)
 	}
 
 	for _, q := range bootQueries {
