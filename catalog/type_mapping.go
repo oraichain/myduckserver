@@ -283,7 +283,8 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 		return types.CreateDecimalType(65, 0)
 
 	case "VARCHAR":
-		if mysqlName == "TEXT" {
+		switch mysqlName {
+		case "TEXT":
 			if length <= types.TinyTextBlobMax {
 				return types.TinyText, nil
 			} else if length <= types.TextBlobMax {
@@ -293,17 +294,18 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 			} else {
 				return types.LongText, nil
 			}
-		} else if mysqlName == "VARCHAR" {
+		case "VARCHAR":
 			return types.CreateString(sqltypes.VarChar, length, collation)
-		} else if mysqlName == "CHAR" {
+		case "CHAR":
 			return types.CreateString(sqltypes.Char, length, collation)
-		} else if mysqlName == "SET" {
+		case "SET":
 			return types.CreateSetType(duckType.mysql.Values, collation)
 		}
 		return types.Text, nil
 
 	case "BLOB":
-		if mysqlName == "BLOB" {
+		switch mysqlName {
+		case "BLOB":
 			if length <= types.TinyTextBlobMax {
 				return types.TinyBlob, nil
 			} else if length <= types.TextBlobMax {
@@ -313,9 +315,9 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 			} else {
 				return types.LongBlob, nil
 			}
-		} else if mysqlName == "VARBINARY" {
+		case "VARBINARY":
 			return types.CreateBinary(sqltypes.VarBinary, length)
-		} else if mysqlName == "BINARY" {
+		case "BINARY":
 			return types.CreateBinary(sqltypes.Binary, length)
 		}
 		return types.Blob, nil
