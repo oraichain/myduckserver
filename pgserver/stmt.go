@@ -2,11 +2,12 @@ package pgserver
 
 import (
 	"bytes"
-	"github.com/apecloud/myduckserver/catalog"
 	"regexp"
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/apecloud/myduckserver/catalog"
 
 	"github.com/dolthub/go-mysql-server/sql"
 	"github.com/marcboeker/go-duckdb"
@@ -410,9 +411,38 @@ func getRenamePgCatalogFuncRegex() *regexp.Regexp {
 //	user.abc(1) AS result3,
 //	pg_catalog.xyz(456) AS result4
 func ConvertPgCatalogFuncToSys(sql string) string {
+	// Special handling for ANY(current_schemas(...)) pattern
+	if strings.Contains(sql, "ANY(current_schemas") {
+		// Replace "n.nspname = ANY(current_schemas(true))" with "my_list_contains(current_schemas(true), n.nspname)"
+		sql = strings.ReplaceAll(sql, "n.nspname = ANY(current_schemas(true))", "__sys__.my_list_contains(current_schemas(true), n.nspname)")
+	}
+
+	// Special handling for pg_tablespace_location to avoid syntax errors
+	if strings.Contains(sql, "t.*") && strings.Contains(sql, "pg_tablespace_location") {
+		// Replace the problematic pattern with a working version
+		sql = strings.ReplaceAll(sql, "t.*,pg_tablespace_location", "t.*, __sys__.pg_tablespace_location")
+		sql = strings.ReplaceAll(sql, "t.*__sys__.pg_tablespace_location", "t.*, __sys__.pg_tablespace_location")
+		// Also handle the case where there's no pg_catalog prefix
+		sql = strings.ReplaceAll(sql, "t.*,pg_tablespace_location", "t.*, __sys__.pg_tablespace_location")
+	}
+
+	// Special handling for incorrectly transformed my_list_contains calls
+	if strings.Contains(sql, "my_list_contains(current_schemas(true, n.nspname))") {
+		sql = strings.ReplaceAll(sql, "my_list_contains(current_schemas(true, n.nspname))", "my_list_contains(current_schemas(true), n.nspname)")
+	}
+
+	// Special handling for current_schemas function calls to prevent incorrect transformation
+	if strings.Contains(sql, "current_schemas(true, n.nspname)") {
+		sql = strings.ReplaceAll(sql, "current_schemas(true, n.nspname)", "current_schemas(true)")
+	}
+
 	re := getRenamePgCatalogFuncRegex()
 	return re.ReplaceAllStringFunc(sql, func(m string) string {
 		sub := re.FindStringSubmatch(m)
+		if len(sub) < 4 {
+			// If the regex didn't match properly, return the original string
+			return m
+		}
 		// sub[1]  => Function name from branch A (pg_catalog.<func>)
 		// sub[2]  => Matches from branch B (^|[^.]), not the function name
 		// sub[3]  => Function name from branch B
@@ -420,9 +450,12 @@ func ConvertPgCatalogFuncToSys(sql string) string {
 		if sub[1] != "" {
 			// Matched branch A
 			funcName = sub[1]
-		} else {
+		} else if sub[3] != "" {
 			// Matched branch B
 			funcName = sub[3]
+		} else {
+			// No match found, return original
+			return m
 		}
 		// Return __sys__.<funcName>(
 		return "__sys__." + funcName + "("

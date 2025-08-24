@@ -1180,6 +1180,63 @@ func (h *ConnectionHandler) handledPSQLCommands(statement string) (bool, error) 
 			Tag:    "SELECT",
 		})
 	}
+	// Command: pg_tablespace query (DBeaver table discovery)
+	if statement == "select t.oid,t.*,pg_tablespace_location(t.oid) loc\nfrom pg_catalog.pg_tablespace t \norder by t.oid" {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT t.oid, t.spcname, t.spcowner, t.spcoptions, '' AS loc FROM __sys__.pg_tablespace t ORDER BY t.oid`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: pg_tablespace query with transformed schema (fallback)
+	if strings.Contains(statement, "pg_tablespace_location") && strings.Contains(statement, "t.*") {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT t.oid, t.spcname, t.spcowner, t.spcoptions, '' AS loc FROM __sys__.pg_tablespace t ORDER BY t.oid`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: pg_conversion query (DBeaver encoding discovery)
+	if strings.Contains(statement, "pg_conversion") && strings.Contains(statement, "pg_encoding_to_char") {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT c.contoencoding as encid, 'UTF8' as encname FROM __sys__.pg_conversion c GROUP BY c.contoencoding ORDER BY 2`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: pg_class query (DBeaver table discovery)
+	if strings.Contains(statement, "pg_class") && strings.Contains(statement, "pg_get_expr") && strings.Contains(statement, "pg_get_partkeydef") {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT c.oid, c.relname, c.relnamespace, c.reltype, c.reloftype, c.relowner, c.relam, c.relfilenode, c.reltablespace, c.relpages, c.reltuples, c.relallvisible, c.reltoastrelid, c.relhasindex, c.relisshared, c.relpersistence, c.relkind, c.relnatts, c.relchecks, c.relhasrules, c.relhastriggers, c.relhassubclass, c.relrowsecurity, c.relforcerowsecurity, c.relispopulated, c.relreplident, c.relispartition, c.relrewrite, c.relfrozenxid, c.relminmxid, c.relacl, c.reloptions, c.relpartbound, d.description, '' as partition_expr, '' as partition_key FROM __sys__.pg_class c LEFT OUTER JOIN __sys__.pg_description d ON d.objoid=c.oid AND d.objsubid=0 AND d.classoid='pg_class'::varchar WHERE c.relnamespace=$1 AND c.relkind not in ('i','I','c')`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: SET search_path (PostgreSQL compatibility)
+	if strings.HasPrefix(strings.ToLower(statement), "set search_path") {
+		// DuckDB doesn't support PostgreSQL's search_path, so we'll just return success
+		return true, h.run(ConvertedStatement{
+			String: `SELECT 'SET' AS result`,
+			Tag:    "SET",
+		})
+	}
+	// Command: pg_type query with current_schemas (DBeaver type discovery)
+	if strings.Contains(statement, "pg_type") && strings.Contains(statement, "current_schemas") && strings.Contains(statement, "n.nspname = ANY") {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT e.oid, __sys__.my_list_contains(__sys__.current_schemas(true), n.nspname), n.nspname, e.typname FROM __sys__.pg_type t JOIN __sys__.pg_type e ON t.typelem = e.oid JOIN __sys__.pg_namespace n ON t.typnamespace = n.oid WHERE t.oid = $1`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: pg_type query with my_list_contains (fallback for transformed queries)
+	if strings.Contains(statement, "pg_type") && strings.Contains(statement, "my_list_contains") && strings.Contains(statement, "current_schemas(true, n.nspname)") {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT e.oid, __sys__.my_list_contains(__sys__.current_schemas(true), n.nspname), n.nspname, e.typname FROM __sys__.pg_type t JOIN __sys__.pg_type e ON t.typelem = e.oid JOIN __sys__.pg_namespace n ON t.typnamespace = n.oid WHERE t.oid = $1`,
+			Tag:    "SELECT",
+		})
+	}
+	// Command: Exact match for the problematic pg_type query
+	if statement == "SELECT e.oid, n.nspname = ANY(current_schemas(true)), n.nspname, e.typname FROM pg_catalog.pg_type t JOIN pg_catalog.pg_type e ON t.typelem = e.oid JOIN pg_catalog.pg_namespace n ON t.typnamespace = n.oid WHERE t.oid = $1" {
+		return true, h.run(ConvertedStatement{
+			String: `SELECT e.oid, __sys__.my_list_contains(__sys__.current_schemas(true), n.nspname), n.nspname, e.typname FROM __sys__.pg_type t JOIN __sys__.pg_type e ON t.typelem = e.oid JOIN __sys__.pg_namespace n ON t.typnamespace = n.oid WHERE t.oid = $1`,
+			Tag:    "SELECT",
+		})
+	}
 	return false, nil
 }
 

@@ -169,6 +169,14 @@ var InternalTables = struct {
 	PGClass           InternalTable
 	PGNamespace       InternalTable
 	PGMatViews        InternalTable
+	PGRoles           InternalTable
+	PGShDescription   InternalTable
+	PGConversion      InternalTable
+	PGInherits        InternalTable
+	PGTablespace      InternalTable
+	PGAm              InternalTable
+	PGAuthMembers     InternalTable
+	PGDescription     InternalTable
 }{
 	PersistentVariable: InternalTable{
 		Schema:       "__sys__",
@@ -609,6 +617,236 @@ var InternalTables = struct {
 			"nspacl TEXT",
 		InitialData: InitialDataTables.PGNamespace,
 	},
+	// Table "pg_catalog.pg_roles"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// oid | oid | | not null | | plain | | | |
+	// rolname | name | | not null | | plain | | | |
+	// rolsuper | boolean | | not null | | plain | | | |
+	// rolinherit | boolean | | not null | | plain | | | |
+	// rolcreaterole | boolean | | not null | | plain | | | |
+	// rolcreatedb | boolean | | not null | | plain | | | |
+	// rolcanlogin | boolean | | not null | | plain | | | |
+	// rolreplication | boolean | | not null | | plain | | | |
+	// rolconnlimit | integer | | not null | | plain | | | |
+	// rolpassword | text | | | | extended | | | |
+	// rolvaliduntil | timestamp with time zone | | | | plain | | | |
+	// rolbypassrls | boolean | | not null | | plain | | | |
+	// oiduse | oid | | | | plain | | | |
+	// rolsubtype | oid | | | | plain | | | |
+	// rolname_nsp | oid | | | | plain | | | |
+	PGRoles: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_roles",
+		KeyColumns: []string{
+			"oid",
+		},
+		ValueColumns: []string{
+			"rolname",
+			"rolsuper",
+			"rolinherit",
+			"rolcreaterole",
+			"rolcreatedb",
+			"rolcanlogin",
+			"rolreplication",
+			"rolconnlimit",
+			"rolpassword",
+			"rolvaliduntil",
+			"rolbypassrls",
+			"oiduse",
+			"rolsubtype",
+			"rolname_nsp",
+		},
+		DDL: "oid BIGINT NOT NULL PRIMARY KEY," +
+			"rolname VARCHAR NOT NULL," +
+			"rolsuper BOOLEAN NOT NULL," +
+			"rolinherit BOOLEAN NOT NULL," +
+			"rolcreaterole BOOLEAN NOT NULL," +
+			"rolcreatedb BOOLEAN NOT NULL," +
+			"rolcanlogin BOOLEAN NOT NULL," +
+			"rolreplication BOOLEAN NOT NULL," +
+			"rolconnlimit INTEGER NOT NULL," +
+			"rolpassword TEXT," +
+			"rolvaliduntil TIMESTAMP WITH TIME ZONE," +
+			"rolbypassrls BOOLEAN NOT NULL," +
+			"oiduse BIGINT," +
+			"rolsubtype BIGINT," +
+			"rolname_nsp BIGINT",
+	},
+	// Table "pg_catalog.pg_shdescription"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// objoid | oid | | not null | | plain | | | |
+	// classoid | oid | | not null | | plain | | | |
+	// description | text | | not null | | extended | | | |
+	PGShDescription: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_shdescription",
+		KeyColumns: []string{
+			"objoid",
+			"classoid",
+		},
+		ValueColumns: []string{
+			"description",
+		},
+		DDL: "objoid BIGINT NOT NULL," +
+			"classoid BIGINT NOT NULL," +
+			"description TEXT NOT NULL," +
+			"PRIMARY KEY (objoid, classoid)",
+	},
+	// Table "pg_catalog.pg_conversion"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// oid | oid | | not null | | plain | | | |
+	// conname | name | | not null | | plain | | | |
+	// connamespace | oid | | not null | | plain | | | |
+	// conowner | oid | | not null | | plain | | | |
+	// conforencoding | integer | | not null | | plain | | | |
+	// contoencoding | integer | | not null | | plain | | | |
+	// conproc | regproc | | not null | | plain | | | |
+	// condefault | boolean | | not null | | plain | | | |
+	PGConversion: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_conversion",
+		KeyColumns: []string{
+			"oid",
+		},
+		ValueColumns: []string{
+			"conname",
+			"connamespace",
+			"conowner",
+			"conforencoding",
+			"contoencoding",
+			"conproc",
+			"condefault",
+		},
+		DDL: "oid BIGINT NOT NULL PRIMARY KEY," +
+			"conname VARCHAR NOT NULL," +
+			"connamespace BIGINT NOT NULL," +
+			"conowner BIGINT NOT NULL," +
+			"conforencoding INTEGER NOT NULL," +
+			"contoencoding INTEGER NOT NULL," +
+			"conproc BIGINT NOT NULL," +
+			"condefault BOOLEAN NOT NULL",
+	},
+	// Table "pg_catalog.pg_inherits"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// inhrelid | oid | | not null | | plain | | | |
+	// inhparent | oid | | not null | | plain | | | |
+	// inhseqno | integer | | not null | | plain | | | |
+	// inhdetachpending | boolean | | not null | | plain | | | |
+	PGInherits: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_inherits",
+		KeyColumns: []string{
+			"inhrelid",
+			"inhparent",
+		},
+		ValueColumns: []string{
+			"inhseqno",
+			"inhdetachpending",
+		},
+		DDL: "inhrelid BIGINT NOT NULL," +
+			"inhparent BIGINT NOT NULL," +
+			"inhseqno INTEGER NOT NULL," +
+			"inhdetachpending BOOLEAN NOT NULL," +
+			"PRIMARY KEY (inhrelid, inhparent)",
+	},
+	// Table "pg_catalog.pg_tablespace"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// oid | oid | | not null | | plain | | | |
+	// spcname | name | | not null | | plain | | | |
+	// spcowner | oid | | not null | | plain | | | |
+	// spcoptions | text[] | | | | extended | | | |
+	PGTablespace: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_tablespace",
+		KeyColumns: []string{
+			"oid",
+		},
+		ValueColumns: []string{
+			"spcname",
+			"spcowner",
+			"spcoptions",
+		},
+		DDL: "oid BIGINT NOT NULL PRIMARY KEY," +
+			"spcname VARCHAR NOT NULL," +
+			"spcowner BIGINT NOT NULL," +
+			"spcoptions VARCHAR",
+	},
+	// Table "pg_catalog.pg_am"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// oid | oid | | not null | | plain | | | |
+	// amname | name | | not null | | plain | | | |
+	// amhandler | regproc | | not null | | plain | | | |
+	// amtype | "char" | | not null | | plain | | | |
+	PGAm: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_am",
+		KeyColumns: []string{
+			"oid",
+		},
+		ValueColumns: []string{
+			"amname",
+			"amhandler",
+			"amtype",
+		},
+		DDL: "oid BIGINT NOT NULL PRIMARY KEY," +
+			"amname VARCHAR NOT NULL," +
+			"amhandler BIGINT NOT NULL," +
+			"amtype CHAR NOT NULL",
+	},
+	// Table "pg_catalog.pg_auth_members"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// roleid | oid | | not null | | plain | | | |
+	// member | oid | | not null | | plain | | | |
+	// grantor | oid | | not null | | plain | | | |
+	// admin_option | boolean | | not null | | plain | | | |
+	PGAuthMembers: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_auth_members",
+		KeyColumns: []string{
+			"roleid",
+			"member",
+		},
+		ValueColumns: []string{
+			"grantor",
+			"admin_option",
+		},
+		DDL: "roleid BIGINT NOT NULL," +
+			"member BIGINT NOT NULL," +
+			"grantor BIGINT NOT NULL," +
+			"admin_option BOOLEAN NOT NULL," +
+			"PRIMARY KEY (roleid, member)",
+	},
+	// Table "pg_catalog.pg_description"
+	// Column | Type | Collation | Nullable | Default | Storage | Compression | Stats target | Description
+	//--------+------+-----------+----------+---------+---------+-------------+--------------+-------------
+	// objoid | oid | | not null | | plain | | | |
+	// classoid | oid | | not null | | plain | | | |
+	// objsubid | integer | | not null | | plain | | | |
+	// description | text | | not null | | extended | | | |
+	PGDescription: InternalTable{
+		Schema: "__sys__",
+		Name:   "pg_description",
+		KeyColumns: []string{
+			"objoid",
+			"classoid",
+			"objsubid",
+		},
+		ValueColumns: []string{
+			"description",
+		},
+		DDL: "objoid BIGINT NOT NULL," +
+			"classoid BIGINT NOT NULL," +
+			"objsubid INTEGER NOT NULL," +
+			"description TEXT NOT NULL," +
+			"PRIMARY KEY (objoid, classoid, objsubid)",
+	},
 	// View "pg_catalog.pg_matviews"
 	// postgres=# \d+ pg_catalog.pg_matviews
 	//                          View "pg_catalog.pg_matviews"
@@ -668,6 +906,14 @@ var internalTables = []InternalTable{
 	InternalTables.PGProc,
 	InternalTables.PGClass,
 	InternalTables.PGNamespace,
+	InternalTables.PGRoles,
+	InternalTables.PGShDescription,
+	InternalTables.PGConversion,
+	InternalTables.PGInherits,
+	InternalTables.PGTablespace,
+	InternalTables.PGAm,
+	InternalTables.PGAuthMembers,
+	InternalTables.PGDescription,
 	InternalTables.PGMatViews,
 }
 
