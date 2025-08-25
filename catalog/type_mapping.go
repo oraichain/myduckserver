@@ -202,6 +202,11 @@ func mysqlDataType(duckType AnnotatedDuckType, numericPrecision uint8, numericSc
 	// TODO: The current type mappings are not lossless. We need to store the original type in the column comments.
 	duckName := strings.TrimSpace(strings.ToUpper(duckType.name))
 
+	// Handle arrays (like VARCHAR[], INT[], etc.)
+	if strings.HasSuffix(duckName, "[]") {
+		return types.JSON, nil
+	}
+
 	if strings.HasPrefix(duckName, "DECIMAL") {
 		duckName = "DECIMAL"
 	} else if strings.HasPrefix(duckName, "ENUM") {
